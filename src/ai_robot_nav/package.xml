@@ -7,6 +7,10 @@
   <maintainer email="user@todo.todo">User</maintainer>
   <license>Apache-2.0</license>
 
+  <!-- 运行时依赖统一在这里声明，以便 rosdep 一次性安装（命令见 README）。
+       注意 requests 与 opencv 用的是 rosdep 的 python3-* key，装的是系统包，
+       不是 pip 包；这样 apt 升级 ROS 时两者能保持 ABI 一致。
+       Ollama 本身不是 ROS 依赖，需要单独安装并拉取模型。 -->
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
@@ -14,6 +18,7 @@
   <depend>python3-requests</depend>
   <depend>python3-opencv</depend>
 
+  <!-- 只有 launch 时才需要，编译期用不到。 -->
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>ament_index_python</exec_depend>

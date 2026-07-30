@@ -1,101 +1,120 @@
-# Defaults tuned for TurtleBot3 in Gazebo. Override per robot with
+# ai_robot_nav 默认参数。
+#
+# 默认值针对 Gazebo 中的 TurtleBot3 调过。换机器人时优先整份替换：
 #   ros2 launch ai_robot_nav ai_nav.launch.py params_file:=/path/to/your.yaml
-# or per parameter with -p on the command line.
+# 只临时改一两项时用命令行 -p，或用 launch 参数覆盖（见 launch/ai_nav.launch.py）。
+#
+# 两个节点各有一段 ros__parameters。有几个参数在两边同名但含义不同，注意区分：
+# front_half_angle 在 ai_nav_node 是导航扇区、在 safety_node 是急停扇区（更窄）；
+# max_linear / max_angular 在 ai_nav_node 是第一道钳位、在 safety_node 才是权威上限。
 
 ai_nav_node:
   ros__parameters:
-    # Topics
+    # 话题名。换机器人时通常只需要改这三个。
     scan_topic: "/scan"
     image_topic: "/camera/image_raw"
     cmd_topic: "/ai_cmd_vel"
 
-    # Ollama backend. Point ollama_url at the laptop's LAN address when the
-    # Jetson is only collecting sensors and something else runs the model.
+    # Ollama 后端。当 Jetson 只负责采集传感器、模型跑在另一台机器上时，
+    # 把 ollama_url 指向那台机器的局域网地址即可，不需要改任何源码。
+    # 远端主机需要 OLLAMA_HOST=0.0.0.0 ollama serve 才会监听局域网。
     ollama_url: "http://localhost:11434/api/generate"
     ollama_model: "llava:7b"
+    # 单次请求超时，必须大于实测推理耗时，否则每次都会超时重试。
     ollama_timeout: 30.0
+    # 让模型常驻显存，避免两次推理之间被卸载后重新加载（首次加载可达数十秒）。
     keep_alive: "30m"
+    # 评估 JSON 很短，限制输出长度可以直接缩短推理时间。
     num_predict: 128
+    # 这里要的是稳定的分类结果，不是创造力，所以温度压到接近确定性。
     temperature: 0.1
 
-    # Control loop. inference_period is the target cycle time; the loop sleeps
-    # only the remainder after inference, so slow models simply run slower.
-    # Measured llava:7b latency on this machine is ~0.9 s per decision.
+    # 视觉线程的目标周期。循环只睡掉"周期减推理耗时"的余量，所以模型比这个值慢时
+    # 循环自然变慢，不会积压请求。本机实测 llava:7b 单次决策约 0.9 秒。
     inference_period: 1.0
 
-    # The deterministic LiDAR controller publishes at command_publish_rate and
-    # never waits for Ollama. A visual hint older than vision_ttl is discarded;
-    # control then continues on LiDAR alone when fallback is enabled.
+    # 确定性激光控制回路按 command_publish_rate 发布，全程不等 Ollama。
+    # 视觉提示超过 vision_ttl 即作废，此时若开启 fallback 就继续按纯激光行驶。
+    # vision_ttl 要明显大于 inference_period，否则提示会在两次推理之间反复失效。
     command_publish_rate: 10.0
     vision_ttl: 3.0
 
+    # 单次评估的重试次数（总请求数 = max_retries + 1）。重试期间控制回路不受影响。
     max_retries: 2
+    # 传感器数据超过此时长未更新即视为失效。
     sensor_timeout: 1.0
 
-    # Vision. Set use_image to false to run on LiDAR text only, which is far
-    # faster if measured llava latency makes the closed loop unusable.
+    # 视觉输入。置 use_image: false 可完全跳过模型，走纯激光确定性导航——当实测
+    # 推理延迟高到让闭环不可用时（例如纯 CPU 推理），这样反而快得多。
     use_image: true
+    # 分辨率与质量都压得很低：模型只需看清场景类别，传大图只会拖长推理时间。
     image_width: 320
     image_height: 240
     jpeg_quality: 60
 
-    # Sector geometry in degrees. 0 is straight ahead, positive is left (REP-103).
+    # 扇区几何，单位度。0 为正前方，正值为左（REP-103）。
+    # front_half_angle 过大会让机器人在窄场地里一直原地打转。
     front_half_angle: 30.0
     side_center_angle: 90.0
     side_half_angle: 30.0
 
-    # Deterministic reactive policy. These, not the model, decide the velocity.
-    cruise_speed: 0.18        # forward speed when the path is clear
-    turn_speed: 0.5           # in-place turn rate when something blocks the front
-    reverse_speed: 0.08       # backing speed when boxed in on all three sides
-    forward_clearance: 0.6    # front distance required to keep driving forward
-    trapped_distance: 0.4     # below this on all three sides counts as boxed in
-    tie_threshold: 0.3        # left/right gap under which the vision hint breaks the tie
-    caution_scale: 0.5        # cruise multiplier when vision reports CAUTION
+    # 确定性反应式策略。决定速度的是这些参数，不是模型。
+    cruise_speed: 0.18        # 前方开阔时的直行速度
+    turn_speed: 0.5           # 前方受阻时的原地转向角速度
+    reverse_speed: 0.08       # 三面受困时的后退速度，刻意最慢
+    forward_clearance: 0.6    # 维持直行所需的前方净空
+    trapped_distance: 0.4     # 三面均低于此值判定为被困，转后退
+    tie_threshold: 0.3        # 左右差值小于此值时才允许视觉提示打破平局
+    caution_scale: 0.5        # 视觉报 CAUTION 时的降速倍率，恒小于 1
 
-    # Keep navigating on LiDAR alone when the model is unreachable, blocked in
-    # an HTTP timeout, or produces unusable output.
-    # Set false to stop instead whenever no vision assessment is available.
+    # 模型不可达、卡在 HTTP 超时里、或输出不可用时，是否继续按纯激光行驶。
+    # 置 false 则改为停车（用于必须依赖视觉的场景）。
+    # 注意：与 use_image: false 同时设置会让机器人永远拿不到评估从而不动，
+    # 节点启动时会报错提示。
     lidar_only_fallback: true
 
-    # First of two clamps; safety_node applies the authoritative one.
+    # 第一道钳位；权威上限由 safety_node 施加。
     max_linear: 0.22
     max_angular: 1.5
 
 safety_node:
   ros__parameters:
-    # Topics
+    # 话题名。ai_cmd_topic 必须与 ai_nav_node 的 cmd_topic 一致。
     scan_topic: "/scan"
     ai_cmd_topic: "/ai_cmd_vel"
     cmd_topic: "/cmd_vel"
-    # Gazebo Sim 8 / ROS 2 Jazzy subscribes to TwistStamped. Set false for
-    # base drivers that still consume the traditional geometry_msgs/Twist.
+    # Gazebo Sim 8 / ROS 2 Jazzy 的桥接端订阅 TwistStamped。仍在使用传统
+    # geometry_msgs/Twist 的实车底盘驱动请置为 false。
+    # 部署前用 ros2 topic info /cmd_vel --verbose 确认类型。
     cmd_stamped: true
 
-    # This node is the sole publisher on cmd_topic and republishes at this rate.
+    # 本节点是 cmd_topic 的唯一发布者，并以此频率持续重发。
+    # 频率必须明显高于 ai_nav_node 的推理频率，急停才有意义。
     control_frequency: 20.0
 
-    # Watchdogs. Losing either stream decays the robot to a stop. ai_cmd_timeout
-    # is sized against ai_nav_node's 10 Hz heartbeat, not its inference period.
+    # 两个看门狗。任一路输入断流都会让机器人衰减到停车。
+    # ai_cmd_timeout 要对齐 ai_nav_node 的 10 Hz 心跳，而不是它的推理周期——
+    # 按推理周期设会让真正的节点卡死被掩盖数秒。
     ai_cmd_timeout: 0.7
     scan_timeout: 0.5
 
-    # Stop zone with hysteresis: brake below stop_distance, resume above
-    # clear_distance. The gap between them prevents chattering at the boundary.
+    # 带迟滞的停车区：低于 stop_distance 刹车，高于 clear_distance 才恢复。
+    # 两者之差就是迟滞带，用来抑制机器人在阈值边界上反复启停。
     stop_distance: 0.30
     clear_distance: 0.40
+    # 急停扇区比导航扇区窄：这里只关心"正前方会不会撞"。
     front_half_angle: 20.0
 
-    # Authoritative velocity limits, applied to whatever the model asks for.
+    # 权威速度上限。无论上游（包括模型）要求多快，都以这里为准。
     max_linear: 0.22
     max_angular: 1.5
 
-    # Escape policy while stopped: forward motion is always blocked, but
-    # backing off and turning in place stay available to get out of a corner.
+    # 急停期间的逃生策略：前进永远禁止，但保留后退和原地转向，否则机器人会在
+    # 墙角里彻底卡死。后退另有更低的上限，因为那是看不见的方向。
     allow_reverse_in_emergency: true
     allow_rotate_in_emergency: true
     reverse_speed_limit: 0.1
 
-    # Set true to silence this node entirely for manual teleoperation.
-    # The robot is unguarded while this is on.
+    # 置 true 后本节点完全不发布，把 /cmd_vel 让给 teleop 等外部工具。
+    # 此时机器人处于无保护状态，遥控结束后记得设回 false。
     passthrough_mode: false
