@@ -1,0 +1,15 @@
+# 本仓库在 Windows 编辑、在 WSL/Linux 构建运行。core.autocrlf=true 时，
+# 若没有这里的规则，检出会把 shebang 和 YAML 变成 CRLF，导致
+#   wsl bash ./scripts/sync_to_wsl.sh
+# 直接失败。以下类型在索引与工作区都固定为 LF。
+
+* text=auto
+
+*.sh text eol=lf
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.xml text eol=lf
+*.cfg text eol=lf
+*.md text eol=lf
+.gitignore text eol=lf
