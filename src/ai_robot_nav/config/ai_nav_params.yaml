@@ -1,0 +1,101 @@
+# Defaults tuned for TurtleBot3 in Gazebo. Override per robot with
+#   ros2 launch ai_robot_nav ai_nav.launch.py params_file:=/path/to/your.yaml
+# or per parameter with -p on the command line.
+
+ai_nav_node:
+  ros__parameters:
+    # Topics
+    scan_topic: "/scan"
+    image_topic: "/camera/image_raw"
+    cmd_topic: "/ai_cmd_vel"
+
+    # Ollama backend. Point ollama_url at the laptop's LAN address when the
+    # Jetson is only collecting sensors and something else runs the model.
+    ollama_url: "http://localhost:11434/api/generate"
+    ollama_model: "llava:7b"
+    ollama_timeout: 30.0
+    keep_alive: "30m"
+    num_predict: 128
+    temperature: 0.1
+
+    # Control loop. inference_period is the target cycle time; the loop sleeps
+    # only the remainder after inference, so slow models simply run slower.
+    # Measured llava:7b latency on this machine is ~0.9 s per decision.
+    inference_period: 1.0
+
+    # The deterministic LiDAR controller publishes at command_publish_rate and
+    # never waits for Ollama. A visual hint older than vision_ttl is discarded;
+    # control then continues on LiDAR alone when fallback is enabled.
+    command_publish_rate: 10.0
+    vision_ttl: 3.0
+
+    max_retries: 2
+    sensor_timeout: 1.0
+
+    # Vision. Set use_image to false to run on LiDAR text only, which is far
+    # faster if measured llava latency makes the closed loop unusable.
+    use_image: true
+    image_width: 320
+    image_height: 240
+    jpeg_quality: 60
+
+    # Sector geometry in degrees. 0 is straight ahead, positive is left (REP-103).
+    front_half_angle: 30.0
+    side_center_angle: 90.0
+    side_half_angle: 30.0
+
+    # Deterministic reactive policy. These, not the model, decide the velocity.
+    cruise_speed: 0.18        # forward speed when the path is clear
+    turn_speed: 0.5           # in-place turn rate when something blocks the front
+    reverse_speed: 0.08       # backing speed when boxed in on all three sides
+    forward_clearance: 0.6    # front distance required to keep driving forward
+    trapped_distance: 0.4     # below this on all three sides counts as boxed in
+    tie_threshold: 0.3        # left/right gap under which the vision hint breaks the tie
+    caution_scale: 0.5        # cruise multiplier when vision reports CAUTION
+
+    # Keep navigating on LiDAR alone when the model is unreachable, blocked in
+    # an HTTP timeout, or produces unusable output.
+    # Set false to stop instead whenever no vision assessment is available.
+    lidar_only_fallback: true
+
+    # First of two clamps; safety_node applies the authoritative one.
+    max_linear: 0.22
+    max_angular: 1.5
+
+safety_node:
+  ros__parameters:
+    # Topics
+    scan_topic: "/scan"
+    ai_cmd_topic: "/ai_cmd_vel"
+    cmd_topic: "/cmd_vel"
+    # Gazebo Sim 8 / ROS 2 Jazzy subscribes to TwistStamped. Set false for
+    # base drivers that still consume the traditional geometry_msgs/Twist.
+    cmd_stamped: true
+
+    # This node is the sole publisher on cmd_topic and republishes at this rate.
+    control_frequency: 20.0
+
+    # Watchdogs. Losing either stream decays the robot to a stop. ai_cmd_timeout
+    # is sized against ai_nav_node's 10 Hz heartbeat, not its inference period.
+    ai_cmd_timeout: 0.7
+    scan_timeout: 0.5
+
+    # Stop zone with hysteresis: brake below stop_distance, resume above
+    # clear_distance. The gap between them prevents chattering at the boundary.
+    stop_distance: 0.30
+    clear_distance: 0.40
+    front_half_angle: 20.0
+
+    # Authoritative velocity limits, applied to whatever the model asks for.
+    max_linear: 0.22
+    max_angular: 1.5
+
+    # Escape policy while stopped: forward motion is always blocked, but
+    # backing off and turning in place stay available to get out of a corner.
+    allow_reverse_in_emergency: true
+    allow_rotate_in_emergency: true
+    reverse_speed_limit: 0.1
+
+    # Set true to silence this node entirely for manual teleoperation.
+    # The robot is unguarded while this is on.
+    passthrough_mode: false
