@@ -143,3 +143,24 @@ def test_vision_still_breaks_tie_in_dead_zone():
     """死区内视觉偏好仍可打破平局，且不能覆盖明显更优侧（见下一测试）。"""
     assert plan(0.4, 1.0, 1.0, CFG, hint(direction='RIGHT')).action == 'TURN_RIGHT'
     assert plan(0.4, 1.0, 1.0, CFG, hint(direction='LEFT')).action == 'TURN_LEFT'
+
+
+def test_clearance_hysteresis_holds_forward_in_band():
+    """迟滞带内保持直行，避免 0.59m/0.60m 在 FORWARD 与 TURN 之间抖动。"""
+    result = plan(0.59, 2.0, 0.5, CFG, last_action='FORWARD')
+    assert result.action == 'FORWARD'
+    assert 'hysteresis' in result.reason
+
+
+def test_clearance_hysteresis_holds_turn_in_band():
+    """迟滞带内保持转向，直到前方真正开阔。"""
+    result = plan(0.59, 2.0, 0.5, CFG, last_action='TURN_LEFT')
+    assert result.action == 'TURN_LEFT'
+
+
+def test_clearance_above_band_always_forwards():
+    assert plan(0.61, 0.4, 0.4, CFG, last_action='TURN_LEFT').action == 'FORWARD'
+
+
+def test_clearance_below_band_always_turns():
+    assert plan(0.49, 2.0, 0.5, CFG, last_action='FORWARD').action == 'TURN_LEFT'

@@ -99,8 +99,8 @@ class AINavNode(Node):
         # 便于确认节点还活着。
         self._last_log_signature = None
         self._last_log_time = 0.0
-        # 上一次转向动作，供 navigator 在左右平局死区内保持方向，抑制测量噪声抖动。
-        self._last_turn_action = None
+        # 上一周期动作，供 navigator 做直行/转向迟滞与转向方向保持。
+        self._last_plan_action = None
 
         self._cmd_publisher = self.create_publisher(Twist, self._cmd_topic, 10)
         # 传感器话题用 BEST_EFFORT 的传感器 QoS，与两种发布者都兼容；用默认 QoS
@@ -180,6 +180,7 @@ class AINavNode(Node):
         self.declare_parameter('turn_speed', 0.5)
         self.declare_parameter('reverse_speed', 0.08)
         self.declare_parameter('forward_clearance', 0.6)
+        self.declare_parameter('turn_clearance', 0.5)
         self.declare_parameter('trapped_distance', 0.4)
         self.declare_parameter('tie_threshold', 0.3)
         self.declare_parameter('caution_scale', 0.5)
@@ -217,11 +218,20 @@ class AINavNode(Node):
         self._lidar_only_fallback = bool(get('lidar_only_fallback').value)
 
         # 策略参数打包成不可变配置，之后整个运行期不再变化。
+        forward_clearance = float(get('forward_clearance').value)
+        turn_clearance = float(get('turn_clearance').value)
+        if turn_clearance >= forward_clearance:
+            self.get_logger().warn(
+                'turn_clearance is not below forward_clearance, which disables '
+                'hysteresis; lowering turn_clearance.')
+            turn_clearance = forward_clearance - 0.05
+
         self._nav_config = NavConfig(
             cruise_speed=float(get('cruise_speed').value),
             turn_speed=float(get('turn_speed').value),
             reverse_speed=float(get('reverse_speed').value),
-            forward_clearance=float(get('forward_clearance').value),
+            forward_clearance=forward_clearance,
+            turn_clearance=turn_clearance,
             trapped_distance=float(get('trapped_distance').value),
             tie_threshold=float(get('tie_threshold').value),
             caution_scale=float(get('caution_scale').value),
@@ -320,12 +330,9 @@ class AINavNode(Node):
         # assessment 为 None 时 plan() 按纯激光决策，不需要另一条代码路径。
         decision = plan(
             front, left, right, self._nav_config, assessment,
-            last_turn=self._last_turn_action)
+            last_action=self._last_plan_action)
 
-        if decision.action in ('TURN_LEFT', 'TURN_RIGHT'):
-            self._last_turn_action = decision.action
-        elif decision.action in ('FORWARD', 'REVERSE'):
-            self._last_turn_action = None
+        self._last_plan_action = decision.action
 
         command = Twist()
         # 本地先钳一道。真正的权威上限在 safety_node，这里的作用是让本节点

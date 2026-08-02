@@ -62,7 +62,8 @@ ai_nav_node:
     cruise_speed: 0.18        # 前方开阔时的直行速度
     turn_speed: 0.5           # 前方受阻时的原地转向角速度
     reverse_speed: 0.08       # 三面受困时的后退速度，刻意最慢
-    forward_clearance: 0.6    # 维持直行所需的前方净空
+    forward_clearance: 0.6    # 恢复直行所需的前方净空（迟滞上沿）
+    turn_clearance: 0.5       # 开始转向所需的前方净空（迟滞下沿），两者之间保持当前动作
     trapped_distance: 0.4     # 三面均低于此值判定为被困，转后退
     tie_threshold: 0.3        # 左右差值小于此值视为平局，纯激光下保持转向方向
     caution_scale: 0.5        # 视觉报 CAUTION 时的降速倍率，恒小于 1

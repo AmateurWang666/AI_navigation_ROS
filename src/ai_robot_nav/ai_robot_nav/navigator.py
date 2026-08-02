@@ -23,7 +23,8 @@ class NavConfig(NamedTuple):
     cruise_speed: float = 0.18        # 前方开阔时的直行速度（m/s）
     turn_speed: float = 0.5           # 前方受阻时的原地转向角速度（rad/s）
     reverse_speed: float = 0.08       # 三面受困时的后退速度（m/s），刻意最慢
-    forward_clearance: float = 0.6    # 维持直行所需的前方净空（m）
+    forward_clearance: float = 0.6    # 恢复直行所需的前方净空（m）
+    turn_clearance: float = 0.5       # 开始转向所需的前方净空（m），与上行形成迟滞带
     trapped_distance: float = 0.4     # 三面均低于此值即判定被困（m）
     tie_threshold: float = 0.3        # 左右差值小于此值视为平局，启用方向保持（m）
     caution_scale: float = 0.5        # 视觉报 CAUTION 时的巡航降速倍率，恒小于 1
@@ -78,6 +79,50 @@ def _choose_turn_side(
     return True, f'sides within {config.tie_threshold:.2f}m, defaulting left'
 
 
+def _effective_last_action(
+    last_action: Optional[str],
+    last_turn: Optional[str],
+) -> Optional[str]:
+    """合并上一周期的动作状态，兼容只传 last_turn 的调用方式。"""
+    if last_action is not None:
+        return last_action
+    if last_turn in ('TURN_LEFT', 'TURN_RIGHT'):
+        return last_turn
+    return None
+
+
+def _should_drive_forward(
+    ahead: float,
+    config: NavConfig,
+    last_action: Optional[str],
+) -> bool:
+    """判断是否应直行，带 forward_clearance / turn_clearance 迟滞。
+
+    明显开阔（> forward_clearance）或明显受阻（<= turn_clearance）时直接判定；
+    落在迟滞带内则保持上一动作，避免 FORWARD 与 TURN 在边界上来回切换。
+    """
+    if ahead > config.forward_clearance:
+        return True
+    if ahead <= config.turn_clearance:
+        return False
+    if last_action == 'FORWARD':
+        return True
+    if last_action in ('TURN_LEFT', 'TURN_RIGHT'):
+        return False
+    return False
+
+
+def _forward_plan(ahead: float, config: NavConfig, hazard: str, extra: str = '') -> Plan:
+    speed = config.cruise_speed
+    reason = f'clear ahead ({ahead:.2f}m)'
+    if hazard == 'CAUTION':
+        speed *= config.caution_scale
+        reason += '; vision advises caution'
+    if extra:
+        reason += extra
+    return Plan('FORWARD', speed, 0.0, reason)
+
+
 def plan(
     front,
     left,
@@ -85,6 +130,7 @@ def plan(
     config: NavConfig,
     hint=None,
     last_turn: Optional[str] = None,
+    last_action: Optional[str] = None,
 ) -> Plan:
     """根据三个扇区距离选定动作，视觉提示仅用于收紧结果。
 
@@ -99,6 +145,12 @@ def plan(
     # 超时或被拒绝时，本函数的行为就是纯激光导航，不需要另一条代码路径。
     hazard = hint.hazard if hint is not None else 'NONE'
     preference = hint.preferred_direction if hint is not None else 'NONE'
+    prior_action = _effective_last_action(last_action, last_turn)
+    if last_turn is None and prior_action in ('TURN_LEFT', 'TURN_RIGHT'):
+        last_turn = prior_action
+
+    if config.turn_clearance >= config.forward_clearance:
+        config = config._replace(turn_clearance=config.forward_clearance - 0.05)
 
     if hazard == 'BLOCKED':
         # 视觉看到了雷达测不到的东西：玻璃隔断、下沉台阶、关着的门。覆盖雷达的
@@ -113,15 +165,12 @@ def plan(
             'REVERSE', -config.reverse_speed, 0.0,
             f'boxed in (front {ahead:.2f}m, left {to_left:.2f}m, right {to_right:.2f}m)')
 
-    # 前方净空足够：直行。这是唯一给出正向速度的分支，也是唯一受 CAUTION 影响
-    # 的分支——视觉能压低速度的入口只有这一处。
-    if ahead > config.forward_clearance:
-        speed = config.cruise_speed
-        reason = f'clear ahead ({ahead:.2f}m)'
-        if hazard == 'CAUTION':
-            speed *= config.caution_scale   # 倍率恒小于 1，所以只可能变慢
-            reason += '; vision advises caution'
-        return Plan('FORWARD', speed, 0.0, reason)
+    if _should_drive_forward(ahead, config, prior_action):
+        extra = ''
+        if (config.turn_clearance < ahead <= config.forward_clearance
+                and prior_action == 'FORWARD'):
+            extra = '; holding forward in clearance hysteresis'
+        return _forward_plan(ahead, config, hazard, extra)
 
     # 前方受阻，必须转向。tie_threshold 对纯激光同样生效：落在死区内时保持
     # 上次方向，避免 10 Hz 控制回路因测量噪声在左右之间来回切换。
