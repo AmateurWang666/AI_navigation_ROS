@@ -52,17 +52,24 @@ def test_turn_sign_always_matches_the_action_name():
             assert result.angular_z < 0.0
 
 
-def test_boxed_in_reverses():
-    """三面都贴近障碍时只能后退——转向出不去。"""
-    result = plan(0.2, 0.2, 0.2, CFG)
+def test_boxed_in_reverses_when_rear_is_clear():
+    """三面都贴近障碍且后方开阔时才后退。"""
+    result = plan(0.2, 0.2, 0.2, CFG, rear=3.0)
     assert result.action == 'REVERSE'
     assert result.linear_x < 0.0
+
+
+def test_boxed_in_turns_when_rear_is_blocked():
+    """后方贴近障碍时不盲退，改转向脱困。"""
+    result = plan(0.2, 0.2, 0.2, CFG, rear=0.2)
+    assert result.action in ('TURN_LEFT', 'TURN_RIGHT')
+    assert result.linear_x == pytest.approx(0.0)
 
 
 def test_blind_sector_counts_as_blocked_not_open():
     """None 表示该方向没有有效回波，必须按不可通行处理，不能按空旷处理。"""
     assert plan(None, 3.0, 3.0, CFG).action != 'FORWARD'
-    assert plan(None, None, None, CFG).action == 'REVERSE'
+    assert plan(None, None, None, CFG, rear=3.0).action == 'REVERSE'
 
 
 def test_caution_only_scales_speed_down():
@@ -83,7 +90,7 @@ def test_blocked_hazard_overrides_an_open_lidar_reading():
 
 def test_blocked_hazard_with_no_way_out_reverses():
     """BLOCKED 会一路传导到被困判定：前方作废、两侧又都很窄，就该后退。"""
-    assert plan(3.0, 0.2, 0.2, CFG, hint('BLOCKED')).action == 'REVERSE'
+    assert plan(3.0, 0.2, 0.2, CFG, hint('BLOCKED'), rear=3.0).action == 'REVERSE'
 
 
 def test_hint_breaks_a_tie_between_comparable_sides():

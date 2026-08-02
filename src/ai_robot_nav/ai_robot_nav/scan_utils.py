@@ -79,15 +79,16 @@ def describe_environment(
     front_half_deg: float,
     side_center_deg: float,
     side_half_deg: float,
-) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    """一次取出前、左、右三个方向的最近障碍距离。
+) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """一次取出前、左、右、后四个方向的最近障碍距离。
 
-    返回顺序固定为 (前, 左, 右)，调用方按位置解包，不要调换。
+    返回顺序固定为 (前, 左, 右, 后)。后方扇区取 ±180°，半宽与前方相同。
     """
     front = sector_min_distance(scan, 0.0, front_half_deg)
     left = sector_min_distance(scan, side_center_deg, side_half_deg)
-    right = sector_min_distance(scan, -side_center_deg, side_half_deg)   # 右侧是负角度
-    return front, left, right
+    right = sector_min_distance(scan, -side_center_deg, side_half_deg)
+    rear = sector_min_distance(scan, 180.0, front_half_deg)
+    return front, left, right, rear
 
 
 def format_distance(distance: Optional[float]) -> str:

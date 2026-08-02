@@ -23,6 +23,7 @@ class NavConfig(NamedTuple):
     cruise_speed: float = 0.18        # 前方开阔时的直行速度（m/s）
     turn_speed: float = 0.5           # 前方受阻时的原地转向角速度（rad/s）
     reverse_speed: float = 0.08       # 三面受困时的后退速度（m/s），刻意最慢
+    reverse_clearance: float = 0.4    # 后方净空不足时不盲退（m）
     forward_clearance: float = 0.6    # 恢复直行所需的前方净空（m）
     turn_clearance: float = 0.5       # 开始转向所需的前方净空（m），与上行形成迟滞带
     trapped_distance: float = 0.4     # 三面均低于此值即判定被困（m）
@@ -123,6 +124,13 @@ def _forward_plan(ahead: float, config: NavConfig, hazard: str, extra: str = '')
     return Plan('FORWARD', speed, 0.0, reason)
 
 
+def _rear_safe(rear, config: NavConfig) -> bool:
+    """后方是否有足够空间安全后退。盲区视为不可退。"""
+    if rear is None:
+        return False
+    return _usable(rear) >= config.reverse_clearance
+
+
 def plan(
     front,
     left,
@@ -131,6 +139,7 @@ def plan(
     hint=None,
     last_turn: Optional[str] = None,
     last_action: Optional[str] = None,
+    rear=None,
 ) -> Plan:
     """根据三个扇区距离选定动作，视觉提示仅用于收紧结果。
 
@@ -157,13 +166,23 @@ def plan(
         # 乐观读数，让下面的判断链自然做出反应——包括必要时判定为被困。
         ahead = BLOCKED_AHEAD
 
-    # 三面都贴近障碍：转向也转不出去，只能先退出来再重新决策。
+    # 三面都贴近障碍：后方空间足够才后退，否则转向脱困，避免盲退撞墙。
     if (ahead < config.trapped_distance
             and to_left < config.trapped_distance
             and to_right < config.trapped_distance):
+        if _rear_safe(rear, config):
+            return Plan(
+                'REVERSE', -config.reverse_speed, 0.0,
+                f'boxed in (front {ahead:.2f}m, left {to_left:.2f}m, right {to_right:.2f}m); '
+                f'rear clear ({_usable(rear):.2f}m)')
+        go_left, basis = _choose_turn_side(
+            to_left, to_right, config, preference, last_turn)
+        rear_note = 'blind' if rear is None else f'{_usable(rear):.2f}m'
         return Plan(
-            'REVERSE', -config.reverse_speed, 0.0,
-            f'boxed in (front {ahead:.2f}m, left {to_left:.2f}m, right {to_right:.2f}m)')
+            'TURN_LEFT' if go_left else 'TURN_RIGHT',
+            0.0,
+            config.turn_speed if go_left else -config.turn_speed,
+            f'boxed in but rear blocked ({rear_note}); turning toward {basis}')
 
     if _should_drive_forward(ahead, config, prior_action):
         extra = ''

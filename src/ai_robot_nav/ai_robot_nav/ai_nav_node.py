@@ -34,7 +34,9 @@ from rclpy.signals import SignalHandlerOptions
 from sensor_msgs.msg import Image, LaserScan
 
 from ai_robot_nav.lifecycle import install_shutdown_signals
-from ai_robot_nav.llm_client import DecisionError, OllamaClient, parse_assessment
+from ai_robot_nav.llm_client import (
+    DecisionError, OllamaClient, apply_caution_debounce, parse_assessment,
+)
 from ai_robot_nav.motion import clamp
 from ai_robot_nav.navigator import NavConfig, plan
 from ai_robot_nav.scan_utils import describe_environment, format_distance
@@ -51,15 +53,16 @@ SYSTEM_PROMPT = """你是移动机器人的视觉安全观察员。你不负责�
 {"hazard": "NONE", "preferred_direction": "STRAIGHT", "description": "走廊空旷"}
 
 hazard 取值（只能三选一）：
-- NONE:    画面正常，无需干预
-- CAUTION: 存在应当减速的情况，例如行人、宠物、狭窄通道、反光或湿滑地面、光线昏暗
+- NONE:    画面正常、通道可通行，无需干预（仿真走廊等空旷场景应选此项）
+- CAUTION: 仅当明确看到需要减速的对象时才用，例如行人、宠物、湿滑地面
 - BLOCKED: 前方明确不可通行，例如贴脸的墙面、关闭的门、玻璃隔断、楼梯口或下沉台阶
 
 preferred_direction 取值：LEFT / RIGHT / STRAIGHT / NONE
 仅在左右两侧空间相近时用作参考。不确定就填 NONE。
 
 重要：你的判断只会让机器人更保守（减速或停止），不会让它加速，
-也不会让它驶向激光雷达判定为封闭的方向。宁可保守，不要冒进。
+也不会让它驶向激光雷达判定为封闭的方向。没有明确危险时务必填 NONE，
+不要把正常行驶场景标成 CAUTION。
 """
 
 
@@ -101,6 +104,8 @@ class AINavNode(Node):
         self._last_log_time = 0.0
         # 上一周期动作，供 navigator 做直行/转向迟滞与转向方向保持。
         self._last_plan_action = None
+        self._caution_streak = 0
+        self._last_vision_log = None
 
         self._cmd_publisher = self.create_publisher(Twist, self._cmd_topic, 10)
         # 传感器话题用 BEST_EFFORT 的传感器 QoS，与两种发布者都兼容；用默认 QoS
@@ -179,11 +184,13 @@ class AINavNode(Node):
         self.declare_parameter('cruise_speed', 0.18)
         self.declare_parameter('turn_speed', 0.5)
         self.declare_parameter('reverse_speed', 0.08)
+        self.declare_parameter('reverse_clearance', 0.4)
         self.declare_parameter('forward_clearance', 0.6)
         self.declare_parameter('turn_clearance', 0.5)
         self.declare_parameter('trapped_distance', 0.4)
         self.declare_parameter('tie_threshold', 0.3)
         self.declare_parameter('caution_scale', 0.5)
+        self.declare_parameter('caution_confirmations', 2)
         # 模型不可用时是否继续按纯激光行驶。置 false 则改为停车。
         self.declare_parameter('lidar_only_fallback', True)
 
@@ -216,6 +223,7 @@ class AINavNode(Node):
         self._max_linear = float(get('max_linear').value)
         self._max_angular = float(get('max_angular').value)
         self._lidar_only_fallback = bool(get('lidar_only_fallback').value)
+        self._caution_confirmations = max(1, int(get('caution_confirmations').value))
 
         # 策略参数打包成不可变配置，之后整个运行期不再变化。
         forward_clearance = float(get('forward_clearance').value)
@@ -230,6 +238,7 @@ class AINavNode(Node):
             cruise_speed=float(get('cruise_speed').value),
             turn_speed=float(get('turn_speed').value),
             reverse_speed=float(get('reverse_speed').value),
+            reverse_clearance=float(get('reverse_clearance').value),
             forward_clearance=forward_clearance,
             turn_clearance=turn_clearance,
             trapped_distance=float(get('trapped_distance').value),
@@ -286,7 +295,7 @@ class AINavNode(Node):
 
         # 把雷达读数一并写进提示词，让模型知道自己在看什么场景；但明确告诉它
         # 这只是参考，不需要据此算速度。
-        front, left, right = describe_environment(
+        front, left, right, _rear = describe_environment(
             scan, self._front_half_angle, self._side_center_angle, self._side_half_angle)
         image_b64 = self._encode_image(image)
         if image_b64 is None:
@@ -295,6 +304,13 @@ class AINavNode(Node):
         assessment = self._request_assessment(
             self._build_prompt(front, left, right), image_b64)
         if assessment is not None:
+            assessment, self._caution_streak = apply_caution_debounce(
+                assessment, self._caution_streak, self._caution_confirmations)
+            vision_key = (assessment.hazard, assessment.description)
+            if vision_key != self._last_vision_log:
+                self.get_logger().info(
+                    f'Vision assessment: {assessment.hazard} | {assessment.description}')
+                self._last_vision_log = vision_key
             # 时间戳取它所描述的那一帧图像的时间，而不是请求完成的时间。否则一次
             # 慢响应会让一张旧图看起来很新鲜，TTL 也就失去了意义。
             with self._assessment_lock:
@@ -315,7 +331,7 @@ class AINavNode(Node):
             self._publish_stop()
             return
 
-        front, left, right = describe_environment(
+        front, left, right, rear = describe_environment(
             scan, self._front_half_angle, self._side_center_angle, self._side_half_angle)
         assessment = self._fresh_assessment(now)
 
@@ -330,7 +346,7 @@ class AINavNode(Node):
         # assessment 为 None 时 plan() 按纯激光决策，不需要另一条代码路径。
         decision = plan(
             front, left, right, self._nav_config, assessment,
-            last_action=self._last_plan_action)
+            last_action=self._last_plan_action, rear=rear)
 
         self._last_plan_action = decision.action
 
@@ -430,7 +446,8 @@ class AINavNode(Node):
                 raw = self._client.generate(prompt, SYSTEM_PROMPT, image_b64)
             except requests.RequestException as exc:
                 self.get_logger().error(
-                    f'Ollama request failed ({attempt}/{attempts}): {exc}',
+                    f'Ollama request failed ({attempt}/{attempts}): {exc}. '
+                    'Is "ollama serve" running and is the model pulled?',
                     throttle_duration_sec=5.0)
                 continue
             try:

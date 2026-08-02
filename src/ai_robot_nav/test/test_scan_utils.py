@@ -117,10 +117,12 @@ def test_describe_environment_orders_front_left_right():
     scan.ranges[0] = 0.6
     scan.ranges[90] = 1.2
     scan.ranges[270] = 2.4
-    front, left, right = describe_environment(scan, 30.0, 90.0, 30.0)
+    scan.ranges[180] = 1.0
+    front, left, right, rear = describe_environment(scan, 30.0, 90.0, 30.0)
     assert front == pytest.approx(0.6)
     assert left == pytest.approx(1.2)
     assert right == pytest.approx(2.4)
+    assert rear == pytest.approx(1.0)
 
 
 def test_format_distance_spells_out_the_blind_case():

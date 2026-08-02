@@ -11,7 +11,7 @@
 
 import json
 import re
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, Dict, NamedTuple, Optional, Tuple
 
 import requests
 
@@ -35,6 +35,26 @@ class Assessment(NamedTuple):
     hazard: str               # NONE / CAUTION / BLOCKED
     preferred_direction: str  # LEFT / RIGHT / STRAIGHT / NONE
     description: str          # 自然语言说明，仅用于日志
+
+
+def apply_caution_debounce(
+    assessment: Assessment,
+    streak: int,
+    confirmations: int,
+) -> Tuple[Assessment, int]:
+    """连续 ``confirmations`` 次 CAUTION 才保留降速，单次 NONE/BLOCKED 即清零。
+
+    llava:7b 在仿真走廊里几乎恒报 CAUTION，会把巡航速度永久减半。这里在
+    进入控制回路前做确认：未达次数的 CAUTION 降级为 NONE，BLOCKED 不受影响。
+    ``confirmations <= 1`` 时行为与原来相同（第一次 CAUTION 即生效）。
+    """
+    if assessment.hazard == 'CAUTION':
+        streak += 1
+        if streak < max(1, confirmations):
+            return Assessment(
+                'NONE', assessment.preferred_direction, assessment.description), streak
+        return assessment, streak
+    return assessment, 0
 
 
 def extract_json(text: str) -> Dict[str, Any]:

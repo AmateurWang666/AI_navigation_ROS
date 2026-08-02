@@ -10,7 +10,9 @@ import math
 
 import pytest
 
-from ai_robot_nav.llm_client import DecisionError, extract_json, parse_assessment
+from ai_robot_nav.llm_client import (
+    Assessment, DecisionError, apply_caution_debounce, extract_json, parse_assessment,
+)
 from ai_robot_nav.motion import clamp
 
 GOOD_JSON = '{"hazard": "NONE", "preferred_direction": "STRAIGHT", "description": "clear"}'
@@ -88,3 +90,36 @@ def test_clamp_is_symmetric_and_sign_preserving():
     assert clamp(1.0, 2.0) == pytest.approx(1.0)
     assert clamp(-3.0, -2.0) == pytest.approx(-2.0)
     assert not math.isnan(clamp(0.0, 0.0))
+
+
+def test_single_caution_is_debounced():
+    assessment = Assessment('CAUTION', 'NONE', 'dim hallway')
+    effective, streak = apply_caution_debounce(assessment, 0, 2)
+    assert effective.hazard == 'NONE'
+    assert streak == 1
+
+
+def test_consecutive_caution_applies_after_threshold():
+    first = Assessment('CAUTION', 'NONE', 'dim hallway')
+    second = Assessment('CAUTION', 'NONE', 'dim hallway')
+    mid, streak = apply_caution_debounce(first, 0, 2)
+    final, streak = apply_caution_debounce(second, streak, 2)
+    assert mid.hazard == 'NONE'
+    assert final.hazard == 'CAUTION'
+    assert streak == 2
+
+
+def test_none_resets_caution_streak():
+    caution = Assessment('CAUTION', 'NONE', 'dim hallway')
+    none = Assessment('NONE', 'NONE', 'clear')
+    _, streak = apply_caution_debounce(caution, 0, 2)
+    effective, streak = apply_caution_debounce(none, streak, 2)
+    assert effective.hazard == 'NONE'
+    assert streak == 0
+
+
+def test_blocked_is_not_debounced():
+    blocked = Assessment('BLOCKED', 'NONE', 'wall')
+    effective, streak = apply_caution_debounce(blocked, 5, 2)
+    assert effective.hazard == 'BLOCKED'
+    assert streak == 0
