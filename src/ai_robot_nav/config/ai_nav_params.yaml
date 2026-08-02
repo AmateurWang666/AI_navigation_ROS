@@ -64,7 +64,7 @@ ai_nav_node:
     reverse_speed: 0.08       # 三面受困时的后退速度，刻意最慢
     forward_clearance: 0.6    # 维持直行所需的前方净空
     trapped_distance: 0.4     # 三面均低于此值判定为被困，转后退
-    tie_threshold: 0.3        # 左右差值小于此值时才允许视觉提示打破平局
+    tie_threshold: 0.3        # 左右差值小于此值视为平局，纯激光下保持转向方向
     caution_scale: 0.5        # 视觉报 CAUTION 时的降速倍率，恒小于 1
 
     # 模型不可达、卡在 HTTP 超时里、或输出不可用时，是否继续按纯激光行驶。

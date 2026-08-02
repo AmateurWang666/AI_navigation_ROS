@@ -10,7 +10,7 @@
 写成了断言。
 """
 
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Tuple
 
 # 判定为"前方不可通行"时代入的距离。用 0.0 而不是 None，是为了让下面的距离
 # 比较链保持单一类型，不必到处插入 None 判断。
@@ -25,7 +25,7 @@ class NavConfig(NamedTuple):
     reverse_speed: float = 0.08       # 三面受困时的后退速度（m/s），刻意最慢
     forward_clearance: float = 0.6    # 维持直行所需的前方净空（m）
     trapped_distance: float = 0.4     # 三面均低于此值即判定被困（m）
-    tie_threshold: float = 0.3        # 左右差值小于此值才允许视觉打破平局（m）
+    tie_threshold: float = 0.3        # 左右差值小于此值视为平局，启用方向保持（m）
     caution_scale: float = 0.5        # 视觉报 CAUTION 时的巡航降速倍率，恒小于 1
 
 
@@ -47,7 +47,45 @@ def _usable(distance: Optional[float]) -> float:
     return BLOCKED_AHEAD if distance is None else distance
 
 
-def plan(front, left, right, config: NavConfig, hint=None) -> Plan:
+def _choose_turn_side(
+    to_left: float,
+    to_right: float,
+    config: NavConfig,
+    preference: str,
+    last_turn: Optional[str],
+) -> Tuple[bool, str]:
+    """在需要转向时选定左右，带死区与方向保持。
+
+    明显更优的一侧（差距超过 tie_threshold）始终优先；落在死区内时不再用
+    ``>=`` 裸比较，而是保持上次转向、听视觉偏好，或确定性默认左转。
+    """
+    diff = to_left - to_right
+
+    if diff > config.tie_threshold:
+        return True, f'more open side (left {to_left:.2f}m, right {to_right:.2f}m)'
+    if diff < -config.tie_threshold:
+        return False, f'more open side (left {to_left:.2f}m, right {to_right:.2f}m)'
+
+    if preference == 'LEFT':
+        return True, f'sides within {config.tie_threshold:.2f}m, vision prefers left'
+    if preference == 'RIGHT':
+        return False, f'sides within {config.tie_threshold:.2f}m, vision prefers right'
+    if last_turn == 'TURN_LEFT':
+        return True, f'sides within {config.tie_threshold:.2f}m, holding left'
+    if last_turn == 'TURN_RIGHT':
+        return False, f'sides within {config.tie_threshold:.2f}m, holding right'
+
+    return True, f'sides within {config.tie_threshold:.2f}m, defaulting left'
+
+
+def plan(
+    front,
+    left,
+    right,
+    config: NavConfig,
+    hint=None,
+    last_turn: Optional[str] = None,
+) -> Plan:
     """根据三个扇区距离选定动作，视觉提示仅用于收紧结果。
 
     下面的判断顺序本身就是优先级：先处理被困（唯一会给出负向速度的分支），
@@ -85,15 +123,10 @@ def plan(front, left, right, config: NavConfig, hint=None) -> Plan:
             reason += '; vision advises caution'
         return Plan('FORWARD', speed, 0.0, reason)
 
-    # 前方受阻，必须转向。左右差距明显时一律听雷达；只有当两侧空间相当
-    # （差值小于 tie_threshold）、雷达本身也无从取舍时，才让视觉的方向偏好
-    # 来打破平局。正是这道门槛使模型无法把机器人导向明显更封闭的一侧。
-    if abs(to_left - to_right) < config.tie_threshold and preference in ('LEFT', 'RIGHT'):
-        go_left = preference == 'LEFT'
-        basis = f'sides within {config.tie_threshold:.2f}m, vision prefers {preference.lower()}'
-    else:
-        go_left = to_left >= to_right
-        basis = f'more open side (left {to_left:.2f}m, right {to_right:.2f}m)'
+    # 前方受阻，必须转向。tie_threshold 对纯激光同样生效：落在死区内时保持
+    # 上次方向，避免 10 Hz 控制回路因测量噪声在左右之间来回切换。
+    go_left, basis = _choose_turn_side(
+        to_left, to_right, config, preference, last_turn)
 
     # 动作名与角速度符号在同一个表达式里产生，两者结构上不可能不一致。
     # （曾经把方向交给模型输出时，正是这里出现过"说左转、却给了右转角速度"。）

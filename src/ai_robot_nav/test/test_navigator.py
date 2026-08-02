@@ -115,3 +115,31 @@ def test_hint_never_raises_speed():
 def test_missing_hint_behaves_like_a_clean_assessment():
     """模型缺席与模型报"一切正常"必须完全等价，纯激光才算真正的降级路径。"""
     assert plan(3.0, 3.0, 3.0, CFG, None) == plan(3.0, 3.0, 3.0, CFG, hint())
+
+
+def test_dead_zone_holds_last_turn_despite_noise_flip():
+    """纯激光模式下，死区内测量噪声不应让转向方向来回切换。"""
+    left = plan(0.4, 1.01, 1.00, CFG, last_turn='TURN_LEFT')
+    assert left.action == 'TURN_LEFT'
+
+    right = plan(0.4, 1.00, 1.01, CFG, last_turn='TURN_RIGHT')
+    assert right.action == 'TURN_RIGHT'
+
+
+def test_dead_zone_without_history_defaults_left():
+    """首次进入死区且无视觉偏好时，确定性默认左转。"""
+    result = plan(0.4, 1.0, 1.0, CFG)
+    assert result.action == 'TURN_LEFT'
+    assert result.angular_z > 0.0
+
+
+def test_clear_winner_overrides_last_turn():
+    """明显更优的一侧始终优先，不受方向保持影响。"""
+    result = plan(0.4, 2.0, 0.5, CFG, last_turn='TURN_RIGHT')
+    assert result.action == 'TURN_LEFT'
+
+
+def test_vision_still_breaks_tie_in_dead_zone():
+    """死区内视觉偏好仍可打破平局，且不能覆盖明显更优侧（见下一测试）。"""
+    assert plan(0.4, 1.0, 1.0, CFG, hint(direction='RIGHT')).action == 'TURN_RIGHT'
+    assert plan(0.4, 1.0, 1.0, CFG, hint(direction='LEFT')).action == 'TURN_LEFT'

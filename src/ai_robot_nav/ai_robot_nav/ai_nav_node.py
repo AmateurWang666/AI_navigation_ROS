@@ -99,6 +99,8 @@ class AINavNode(Node):
         # 便于确认节点还活着。
         self._last_log_signature = None
         self._last_log_time = 0.0
+        # 上一次转向动作，供 navigator 在左右平局死区内保持方向，抑制测量噪声抖动。
+        self._last_turn_action = None
 
         self._cmd_publisher = self.create_publisher(Twist, self._cmd_topic, 10)
         # 传感器话题用 BEST_EFFORT 的传感器 QoS，与两种发布者都兼容；用默认 QoS
@@ -316,7 +318,14 @@ class AINavNode(Node):
             return
 
         # assessment 为 None 时 plan() 按纯激光决策，不需要另一条代码路径。
-        decision = plan(front, left, right, self._nav_config, assessment)
+        decision = plan(
+            front, left, right, self._nav_config, assessment,
+            last_turn=self._last_turn_action)
+
+        if decision.action in ('TURN_LEFT', 'TURN_RIGHT'):
+            self._last_turn_action = decision.action
+        elif decision.action in ('FORWARD', 'REVERSE'):
+            self._last_turn_action = None
 
         command = Twist()
         # 本地先钳一道。真正的权威上限在 safety_node，这里的作用是让本节点
