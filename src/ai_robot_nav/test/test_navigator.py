@@ -171,3 +171,12 @@ def test_clearance_above_band_always_forwards():
 
 def test_clearance_below_band_always_turns():
     assert plan(0.49, 2.0, 0.5, CFG, last_action='FORWARD').action == 'TURN_LEFT'
+
+
+def test_near_wall_locks_turn_direction():
+    """贴近墙壁时扩大转向死区，避免左右小幅噪声导致来回摆。"""
+    left = plan(0.30, 1.05, 1.00, CFG, last_turn='TURN_LEFT')
+    assert left.action == 'TURN_LEFT'
+
+    right = plan(0.30, 1.00, 1.05, CFG, last_turn='TURN_RIGHT')
+    assert right.action == 'TURN_RIGHT'

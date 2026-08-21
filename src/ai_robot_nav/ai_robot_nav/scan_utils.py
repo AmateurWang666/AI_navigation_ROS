@@ -79,15 +79,19 @@ def describe_environment(
     front_half_deg: float,
     side_center_deg: float,
     side_half_deg: float,
+    front_center_deg: float = 0.0,
+    rear_center_deg: float = 180.0,
 ) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
     """一次取出前、左、右、后四个方向的最近障碍距离。
 
-    返回顺序固定为 (前, 左, 右, 后)。后方扇区取 ±180°，半宽与前方相同。
+    返回顺序固定为 (前, 左, 右, 后)。``front_center_deg`` / ``rear_center_deg``
+    用于雷达安装角与机器人朝向不一致时（例如 tjark_agv 激光视场为 90°–270°，
+    机器人正前方对应扫描角 180° 而非 0°）。
     """
-    front = sector_min_distance(scan, 0.0, front_half_deg)
+    front = sector_min_distance(scan, front_center_deg, front_half_deg)
     left = sector_min_distance(scan, side_center_deg, side_half_deg)
     right = sector_min_distance(scan, -side_center_deg, side_half_deg)
-    rear = sector_min_distance(scan, 180.0, front_half_deg)
+    rear = sector_min_distance(scan, rear_center_deg, front_half_deg)
     return front, left, right, rear
 
 

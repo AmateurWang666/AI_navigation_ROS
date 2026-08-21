@@ -1,0 +1,25 @@
+<launch>
+  <!--
+    同时启动 ai_nav_node 与 safety_node。
+    tjark_agv 仿真示例：
+      roslaunch ai_robot_nav ai_nav.launch use_sim_time:=true \
+        params_file:=$(rospack find ai_robot_nav)/config/tjark_agv_params.yaml
+  -->
+  <arg name="params_file" default="$(find ai_robot_nav)/config/ai_nav_params.yaml"/>
+  <arg name="ollama_url" default="http://localhost:11434/api/generate"/>
+  <arg name="ollama_model" default="llava:7b"/>
+  <arg name="use_image" default="true"/>
+  <arg name="use_sim_time" default="false"/>
+
+  <param name="/use_sim_time" value="$(arg use_sim_time)"/>
+
+  <rosparam file="$(arg params_file)" command="load"/>
+
+  <node pkg="ai_robot_nav" type="ai_nav_node" name="ai_nav_node" output="screen">
+    <param name="ollama_url" value="$(arg ollama_url)"/>
+    <param name="ollama_model" value="$(arg ollama_model)"/>
+    <param name="use_image" value="$(arg use_image)"/>
+  </node>
+
+  <node pkg="ai_robot_nav" type="safety_node" name="safety_node" output="screen"/>
+</launch>

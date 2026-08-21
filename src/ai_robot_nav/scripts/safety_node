@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""Thin launcher for safety_node (catkin install)."""
+
+from ai_robot_nav.safety_node import main
+
+if __name__ == '__main__':
+    main()

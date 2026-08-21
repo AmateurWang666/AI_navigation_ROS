@@ -1,7 +1,8 @@
-# colcon artefacts
+# colcon / catkin artefacts
 build/
 install/
 log/
+devel/
 
 # Python
 __pycache__/

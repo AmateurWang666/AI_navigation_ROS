@@ -49,35 +49,44 @@ def _usable(distance: Optional[float]) -> float:
     return BLOCKED_AHEAD if distance is None else distance
 
 
+def _effective_tie_threshold(ahead: float, config: NavConfig) -> float:
+    """前方越近，转向方向锁定越紧，避免贴墙时左右来回摆。"""
+    if ahead <= config.turn_clearance:
+        return max(config.tie_threshold * 3.0, 1.0)
+    return config.tie_threshold
+
+
 def _choose_turn_side(
     to_left: float,
     to_right: float,
     config: NavConfig,
     preference: str,
     last_turn: Optional[str],
+    tie_threshold: Optional[float] = None,
 ) -> Tuple[bool, str]:
     """在需要转向时选定左右，带死区与方向保持。
 
     明显更优的一侧（差距超过 tie_threshold）始终优先；落在死区内时不再用
     ``>=`` 裸比较，而是保持上次转向、听视觉偏好，或确定性默认左转。
     """
+    threshold = config.tie_threshold if tie_threshold is None else tie_threshold
     diff = to_left - to_right
 
-    if diff > config.tie_threshold:
+    if diff > threshold:
         return True, f'more open side (left {to_left:.2f}m, right {to_right:.2f}m)'
-    if diff < -config.tie_threshold:
+    if diff < -threshold:
         return False, f'more open side (left {to_left:.2f}m, right {to_right:.2f}m)'
 
     if preference == 'LEFT':
-        return True, f'sides within {config.tie_threshold:.2f}m, vision prefers left'
+        return True, f'sides within {threshold:.2f}m, vision prefers left'
     if preference == 'RIGHT':
-        return False, f'sides within {config.tie_threshold:.2f}m, vision prefers right'
+        return False, f'sides within {threshold:.2f}m, vision prefers right'
     if last_turn == 'TURN_LEFT':
-        return True, f'sides within {config.tie_threshold:.2f}m, holding left'
+        return True, f'sides within {threshold:.2f}m, holding left'
     if last_turn == 'TURN_RIGHT':
-        return False, f'sides within {config.tie_threshold:.2f}m, holding right'
+        return False, f'sides within {threshold:.2f}m, holding right'
 
-    return True, f'sides within {config.tie_threshold:.2f}m, defaulting left'
+    return True, f'sides within {threshold:.2f}m, defaulting left'
 
 
 def _effective_last_action(
@@ -176,7 +185,8 @@ def plan(
                 f'boxed in (front {ahead:.2f}m, left {to_left:.2f}m, right {to_right:.2f}m); '
                 f'rear clear ({_usable(rear):.2f}m)')
         go_left, basis = _choose_turn_side(
-            to_left, to_right, config, preference, last_turn)
+            to_left, to_right, config, preference, last_turn,
+            tie_threshold=_effective_tie_threshold(ahead, config))
         rear_note = 'blind' if rear is None else f'{_usable(rear):.2f}m'
         return Plan(
             'TURN_LEFT' if go_left else 'TURN_RIGHT',
@@ -194,7 +204,8 @@ def plan(
     # 前方受阻，必须转向。tie_threshold 对纯激光同样生效：落在死区内时保持
     # 上次方向，避免 10 Hz 控制回路因测量噪声在左右之间来回切换。
     go_left, basis = _choose_turn_side(
-        to_left, to_right, config, preference, last_turn)
+        to_left, to_right, config, preference, last_turn,
+        tie_threshold=_effective_tie_threshold(ahead, config))
 
     # 动作名与角速度符号在同一个表达式里产生，两者结构上不可能不一致。
     # （曾经把方向交给模型输出时，正是这里出现过"说左转、却给了右转角速度"。）

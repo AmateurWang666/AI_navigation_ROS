@@ -1,34 +1,23 @@
 <?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
-<package format="3">
+<package format="2">
   <name>ai_robot_nav</name>
   <version>0.0.1</version>
-  <description>ROS 2 package for LLM-based autonomous navigation using Ollama (LLaVA) and Safety Guard</description>
+  <description>ROS 1 package for LLM-based autonomous navigation using Ollama (LLaVA) and Safety Guard</description>
   <maintainer email="user@todo.todo">User</maintainer>
   <license>Apache-2.0</license>
 
-  <!-- 运行时依赖统一在这里声明，以便 rosdep 一次性安装（命令见 README）。
-       注意 requests 与 opencv 用的是 rosdep 的 python3-* key，装的是系统包，
-       不是 pip 包；这样 apt 升级 ROS 时两者能保持 ABI 一致。
-       Ollama 本身不是 ROS 依赖，需要单独安装并拉取模型。 -->
-  <depend>rclpy</depend>
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>cv_bridge</depend>
-  <depend>python3-requests</depend>
-  <depend>python3-opencv</depend>
+  <depend>std_msgs</depend>
 
-  <!-- 只有 launch 时才需要，编译期用不到。 -->
-  <exec_depend>launch</exec_depend>
-  <exec_depend>launch_ros</exec_depend>
-  <exec_depend>ament_index_python</exec_depend>
-
-  <test_depend>ament_copyright</test_depend>
-  <test_depend>ament_flake8</test_depend>
-  <test_depend>ament_pep257</test_depend>
-  <test_depend>python3-pytest</test_depend>
+  <exec_depend>roslaunch</exec_depend>
+  <exec_depend>python3-requests</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
 
   <export>
-    <build_type>ament_python</build_type>
   </export>
 </package>
