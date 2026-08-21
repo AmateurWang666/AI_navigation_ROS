@@ -16,8 +16,6 @@
 
 仿真平台为外部包 **[tjark_agv](https://github.com/)**（只读集成，不修改其 URDF/控制器源码）。开发环境推荐 **Windows + WSL2（Ubuntu 24.04）+ ROS Noetic**。
 
-更完整的 GitHub 仓库简介与 Topics 见 **[docs/about.md](docs/about.md)**。
-
 ---
 
 ## 核心特性
@@ -165,7 +163,6 @@ bash scripts/sim.sh nav           # 仅导航（终端 2，自动等 /scan）
 ROS2_AI_Robot_Workspace/
 ├── README.md
 ├── docs/
-│   ├── about.md              # GitHub About 文案
 │   ├── quick_start.md        # 仿真启动详解
 │   └── tjark_agv_sim.md      # tjark 话题与部署说明
 ├── scripts/
@@ -255,7 +252,6 @@ cd src/ai_robot_nav && python -m pytest test/ -q
 |------|------|
 | [docs/quick_start.md](docs/quick_start.md) | 一键启动、两终端 GUI、改代码流程 |
 | [docs/tjark_agv_sim.md](docs/tjark_agv_sim.md) | tjark 部署、话题、与 TurtleBot3 差异 |
-| [docs/about.md](docs/about.md) | GitHub 仓库 About 描述与 Topics |
 
 ---
 
