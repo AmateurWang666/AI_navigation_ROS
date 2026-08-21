@@ -2,7 +2,7 @@
 <package format="2">
   <name>ai_robot_nav</name>
   <version>0.0.1</version>
-  <description>ROS 1 package for LLM-based autonomous navigation using Ollama (LLaVA) and Safety Guard</description>
+  <description>ROS 1 Noetic navigation for tjark_agv: deterministic LiDAR planning with optional Ollama/LLaVA vision safety layer and independent emergency stop node.</description>
   <maintainer email="user@todo.todo">User</maintainer>
   <license>Apache-2.0</license>
 
