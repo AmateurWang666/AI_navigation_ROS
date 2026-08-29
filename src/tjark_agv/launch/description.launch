@@ -1,0 +1,16 @@
+<!--
+  车辆描述层：把 URDF 放到参数服务器，并发布各连杆的 TF。仿真与实车共用同一份。
+
+  xacro 里的 <gazebo> 标签（传感器、差速驱动插件）只有 gzserver 会读取，
+  robot_state_publisher 与实车驱动会直接忽略，因此这里不需要按平台分叉。
+-->
+<launch>
+  <arg name="publish_tf" default="true"/>
+
+  <param name="robot_description"
+         command="$(find xacro)/xacro $(find tjark_agv)/urdf/tjark_agv.xacro"/>
+
+  <node if="$(arg publish_tf)"
+        name="robot_state_publisher" pkg="robot_state_publisher"
+        type="robot_state_publisher" output="screen"/>
+</launch>

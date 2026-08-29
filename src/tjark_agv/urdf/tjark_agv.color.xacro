@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<robot name="tjark_agv" xmlns:xacro="http://ros.org/wiki/xacro">
+    <gazebo reference="base_link">
+        <minDepth>0.001</minDepth>
+        <material>Gazebo/Gray</material>
+    </gazebo> 
+
+    <gazebo reference="base_body">
+        <minDepth>0.001</minDepth>
+        <material>Gazebo/Gray</material>
+    </gazebo> 
+
+    <gazebo reference="LF_link">
+        <mu1>0.0</mu1>
+        <mu2>0.0</mu2>
+        <minDepth>0.001</minDepth>
+        <material>Gazebo/Orange</material>
+    </gazebo> 
+
+    <gazebo reference="LB_link">
+        <mu1>0.0</mu1>
+        <mu2>0.0</mu2>
+        <minDepth>0.001</minDepth>
+        <material>Gazebo/Orange</material>
+    </gazebo> 
+
+    <gazebo reference="RF_link">
+        <mu1>0.0</mu1>
+        <mu2>0.0</mu2>
+        <minDepth>0.001</minDepth>
+        <material>Gazebo/Orange</material>
+    </gazebo> 
+
+    <gazebo reference="RB_link">
+        <mu1>0.0</mu1>
+        <mu2>0.0</mu2>
+        <minDepth>0.001</minDepth>
+        <material>Gazebo/Orange</material>
+    </gazebo> 
+
+    <gazebo reference="laser">
+        <minDepth>0.001</minDepth>
+        <material>Gazebo/Black</material>
+    </gazebo> 
+
+    <gazebo reference="camera_link">
+        <minDepth>0.001</minDepth>
+        <material>Gazebo/Black</material>
+    </gazebo> 
+
+    <gazebo reference="left_wheel">
+        <mu1>0.5</mu1>
+        <mu2>0.5</mu2>
+        <kp>5000000.0</kp>
+        <kd>1000.0</kd>
+        <minDepth>0.001</minDepth>
+        <maxVel>1.0</maxVel>
+        <material>Gazebo/Black</material>
+    </gazebo> 
+
+    <gazebo reference="right_wheel">
+        <mu1>0.5</mu1>
+        <mu2>0.5</mu2>
+        <kp>5000000.0</kp>
+        <kd>1000.0</kd>
+        <minDepth>0.001</minDepth>
+        <maxVel>1.0</maxVel>
+        <material>Gazebo/Black</material>
+    </gazebo> 
+</robot>

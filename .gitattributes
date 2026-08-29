@@ -1,7 +1,7 @@
 # 本仓库在 Windows 编辑、在 WSL/Linux 构建运行。core.autocrlf=true 时，
-# 若没有这里的规则，检出会把 shebang 和 YAML 变成 CRLF，导致
-#   wsl bash ./scripts/sync_to_wsl.sh
-# 直接失败。以下类型在索引与工作区都固定为 LF。
+# 若没有这里的规则，检出会把 shebang、YAML、xacro 变成 CRLF，导致
+#   wsl bash ./scripts/sync_ws.sh
+# 或 roslaunch 解析直接失败。以下类型在索引与工作区都固定为 LF。
 
 * text=auto
 
@@ -12,4 +12,17 @@
 *.xml text eol=lf
 *.cfg text eol=lf
 *.md text eol=lf
+*.launch text eol=lf
+*.urdf text eol=lf
+*.xacro text eol=lf
+*.world text eol=lf
+*.sdf text eol=lf
+*.config text eol=lf
 .gitignore text eol=lf
+
+# 网格与贴图是二进制，不要做行尾转换
+*.STL binary
+*.stl binary
+*.dae binary
+*.jpg binary
+*.png binary

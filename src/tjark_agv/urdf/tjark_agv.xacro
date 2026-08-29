@@ -1,0 +1,8 @@
+<?xml version="1.0"?>  
+<robot name="tjark_agv" xmlns:xacro="http://ros.org/wiki/xacro"> 
+    <xacro:include filename="$(find tjark_agv)/urdf/tjark_agv.urdf" /> 
+    <xacro:include filename="$(find tjark_agv)/urdf/tjark_agv.sensor.xacro" /> 
+    <xacro:include filename="$(find tjark_agv)/urdf/tjark_agv.motor.xacro" /> 
+    <xacro:include filename="$(find tjark_agv)/urdf/tjark_agv.controller.xacro" /> 
+    <xacro:include filename="$(find tjark_agv)/urdf/tjark_agv.color.xacro" /> 
+</robot>

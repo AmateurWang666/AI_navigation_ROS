@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>tjark_agv</name>
+  <version>1.1.0</version>
+  <description>
+    tjark_agv 差速底盘的车辆描述包：URDF/xacro、STL 网格、Gazebo 传感器与差速驱动
+    插件，以及唯一的 cafe 仿真世界（连同其 Gazebo 模型一并内置，可离线加载）。
+
+    本包是仿真与实车共享的唯一几何/传感器真相源。上层导航逻辑在 ai_robot_nav 中，
+    与本包解耦：换成实车时只需停用本包的 Gazebo 部分，URDF 与话题名保持不变。
+
+    原始 URDF 由 SolidWorks 导出，后并入本仓库统一维护。
+  </description>
+  <maintainer email="user@todo.todo">User</maintainer>
+  <license>BSD</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <exec_depend>roslaunch</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+
+  <export>
+    <architecture_independent />
+    <gazebo_ros gazebo_model_path="${prefix}/models"/>
+  </export>
+</package>

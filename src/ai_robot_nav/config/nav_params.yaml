@@ -1,0 +1,84 @@
+# tjark_agv 导航参数。仓库只有这一份，仿真与实车共用。
+#
+# 话题（由 tjark_agv 的 Gazebo 插件提供，实车驱动需对齐同样的名字）：
+#   激光 /scan · 相机 /my_camera/color/image_raw · 底盘 /cmd_vel（Twist，非 TwistStamped）
+#
+# 挪到实车时优先复核带「实车」字样的几项；其余取值按较小底盘留了保守余量，
+# 逐项重标定的顺序见 docs/real_robot.md。
+
+ai_nav_node:
+  scan_topic: "/scan"
+  image_topic: "/my_camera/color/image_raw"
+  cmd_topic: "/ai_cmd_vel"
+
+  # ---- Ollama 视觉层（可选，未启动时自动降级为纯激光）----
+  ollama_url: "http://localhost:11434/api/generate"
+  ollama_model: "llava:7b"
+  ollama_timeout: 30.0
+  keep_alive: "30m"
+  num_predict: 128
+  temperature: 0.1
+  inference_period: 1.0
+  vision_ttl: 3.0
+  max_retries: 2
+  use_image: true
+  image_width: 320
+  image_height: 240
+  jpeg_quality: 60
+  caution_scale: 0.5
+  caution_confirmations: 2
+  lidar_only_fallback: true
+
+  # ---- 激光扇区 ----
+  # front_center_angle 是「车体正前方对应的扫描角」，也就是雷达相对车体的安装偏转角。
+  # 左右与后方扇区全部由它推算，不单独配置。tjark_agv 的雷达绕 z 轴装反了 180°
+  # （tf 实测 R_base_laser = Rz(pi)），因此正前方落在扫描角 180°、左侧 270°、右侧 90°。
+  # 【实车】雷达安装角不同就必须改这一项，否则左右会整体反过来，机器人朝障碍转。
+  front_center_angle: 180.0
+  front_half_angle: 30.0
+  side_center_angle: 90.0
+  side_half_angle: 30.0
+
+  # ---- 速度与净空（【实车】全部需重标定）----
+  command_publish_rate: 10.0
+  sensor_timeout: 1.0
+  cruise_speed: 0.15
+  turn_speed: 0.45
+  reverse_speed: 0.06
+  reverse_clearance: 0.35
+  forward_clearance: 0.70        # 大于此距离可直行
+  turn_clearance: 0.55           # 小于此距离必须转向，与上行构成迟滞带
+  trapped_distance: 0.35
+  tie_threshold: 0.6             # 左右差值小于此值算平局，保持上次方向
+  max_linear: 0.20
+  max_angular: 1.2
+
+  # ---- 脱困 ----
+  # 连续转 4s 就锁死方向、不再比较左右；转到 9s 还没出来说明车头已顶住障碍，
+  # 改为边退边转把车头拽出来。0.45 rad/s 下 9s 约合 230°，正常避障远用不到。
+  # 【实车】本车雷达只有前向 180° 视场，后方是盲区：没有后向传感器或防撞条时，
+  # 请把 escape_reverse_time 置 0 关闭后退动作。
+  escape_commit_time: 4.0
+  escape_reverse_time: 9.0
+  turn_latch_timeout: 3.0        # 停止转向后方向锁存的保留时长
+
+safety_node:
+  scan_topic: "/scan"
+  ai_cmd_topic: "/ai_cmd_vel"
+  cmd_topic: "/cmd_vel"
+  cmd_stamped: false
+  control_frequency: 20.0
+  ai_cmd_timeout: 0.7
+  scan_timeout: 0.5
+  front_center_angle: 180.0      # 与 ai_nav_node 保持一致
+  front_half_angle: 20.0
+  # 【实车】急停距离从雷达算起，而雷达装在 base_link 前方 0.166 m 处；
+  # 实车需按车头实际外廓与制动距离重新给值。
+  stop_distance: 0.24
+  clear_distance: 0.34           # 高于 stop_distance 才有迟滞，避免停走抖动
+  max_linear: 0.20
+  max_angular: 1.2
+  allow_reverse_in_emergency: true
+  allow_rotate_in_emergency: true
+  reverse_speed_limit: 0.08
+  passthrough_mode: false

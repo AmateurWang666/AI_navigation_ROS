@@ -11,9 +11,8 @@
 #   bash ./scripts/install_ros_noetic.sh
 #
 # 安装完成后新开终端：
-#   source /opt/ros/noetic/setup.bash
-#   source ~/ros_ws/devel/setup.bash
-#   roslaunch tjark_agv tjark_agv.launch
+#   cd /mnt/c/Users/ROG/Desktop/ROS2_AI_Robot_Workspace
+#   bash ./scripts/sim.sh
 
 set -o pipefail
 
@@ -95,9 +94,9 @@ echo "=== Building catkin workspace ==="
 # 非 root 执行同步与构建
 if [ "$EUID" -eq 0 ]; then
     echo "Re-run workspace setup as normal user:"
-    echo "  bash $REPO_DIR/scripts/setup_ros1_ws.sh --build"
+    echo "  bash $REPO_DIR/scripts/sync_ws.sh --build"
 else
-    bash "$REPO_DIR/scripts/setup_ros1_ws.sh" --build
+    bash "$REPO_DIR/scripts/sync_ws.sh" --build
 fi
 
 echo
@@ -109,7 +108,6 @@ echo "  echo 'source /opt/ros/noetic/setup.bash' >> ~/.bashrc"
 echo "  echo 'source ~/ros_ws/devel/setup.bash' >> ~/.bashrc"
 echo
 echo "Start simulation (new terminal):"
-echo "  source /opt/ros/noetic/setup.bash"
-echo "  source ~/ros_ws/devel/setup.bash"
-echo "  roslaunch tjark_agv tjark_agv.launch"
+echo "  cd $REPO_DIR"
+echo "  bash ./scripts/sim.sh"
 echo "=============================================="

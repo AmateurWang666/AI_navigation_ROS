@@ -1,0 +1,50 @@
+<!--
+  唯一的仿真环境：Gazebo Classic + 内置 cafe 场景 + tjark_agv 车辆。
+
+    roslaunch tjark_agv cafe_world.launch              # 无 GUI（默认，快）
+    roslaunch tjark_agv cafe_world.launch gui:=true    # 带 Gazebo 窗口
+
+  世界文件与它引用的 cafe / cafe_table 模型都在本包 worlds/ 与 models/ 下。
+  能离线加载的前提是 GAZEBO_MODEL_PATH 里有本包的 models/，这由 package.xml 的
+  <gazebo_ros gazebo_model_path=.../> 导出在 source devel/setup.bash 时自动完成，
+  scripts/ros_env.sh 也会再设一次。缺了它 Gazebo 会转去联网找模型，
+  在 WSL 上表现为启动卡住好几分钟。
+
+  headless 下 gzserver 照常发布 /scan、/my_camera/color/image_raw、/odom，
+  并订阅 /cmd_vel，因此不开窗口也能完整跑导航。
+-->
+<launch>
+  <arg name="gui" default="false"/>
+  <arg name="headless" default="true"/>
+  <arg name="paused" default="false"/>
+  <arg name="use_sim_time" default="true"/>
+  <arg name="world_name" default="$(find tjark_agv)/worlds/cafe.world"/>
+
+  <!-- cafe 场景里一块空旷的地面，正对着可以直行一段的方向 -->
+  <arg name="spawn_x" default="1.40"/>
+  <arg name="spawn_y" default="3.125"/>
+  <arg name="spawn_z" default="0.4"/>
+  <arg name="spawn_yaw" default="0.0"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(arg world_name)"/>
+    <arg name="paused" value="$(arg paused)"/>
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+    <arg name="headless" value="$(arg headless)"/>
+    <arg name="gui" value="$(arg gui)"/>
+  </include>
+
+  <include file="$(find tjark_agv)/launch/description.launch"/>
+
+  <node pkg="gazebo_ros" type="spawn_model" name="spawn_tjark_agv" output="screen"
+        args="-urdf -param robot_description -model tjark_agv
+              -x $(arg spawn_x) -y $(arg spawn_y) -z $(arg spawn_z)
+              -R 0 -P 0 -Y $(arg spawn_yaw)"/>
+
+  <!--
+    gazebo_ros_control 的 PID 参数。当前底盘由 libgazebo_ros_diff_drive.so 驱动，
+    并不经过 ros_control，因此这份参数处于待用状态；与 urdf/tjark_agv.motor.xacro
+    里的 transmission 配成一套，将来实车改走 ros_control 时直接启用。
+  -->
+  <rosparam file="$(find tjark_agv)/urdf/tjark_agv.controller.yaml" command="load"/>
+</launch>

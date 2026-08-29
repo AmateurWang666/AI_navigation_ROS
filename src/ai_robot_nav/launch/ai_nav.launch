@@ -1,11 +1,12 @@
+<!--
+  导航层：ai_nav_node（激光决策 + 可选视觉收敛）与 safety_node（急停/限速）。
+
+  这一层不含任何仿真或硬件相关内容，仿真与实车完全共用；平台差异只体现在
+  由谁提供 /scan、/my_camera/color/image_raw、/cmd_vel 这几个话题。
+  一般不直接启动它，而是走 sim.launch 或 real.launch。
+-->
 <launch>
-  <!--
-    同时启动 ai_nav_node 与 safety_node。
-    tjark_agv 仿真示例：
-      roslaunch ai_robot_nav ai_nav.launch use_sim_time:=true \
-        params_file:=$(rospack find ai_robot_nav)/config/tjark_agv_params.yaml
-  -->
-  <arg name="params_file" default="$(find ai_robot_nav)/config/ai_nav_params.yaml"/>
+  <arg name="params_file" default="$(find ai_robot_nav)/config/nav_params.yaml"/>
   <arg name="ollama_url" default="http://localhost:11434/api/generate"/>
   <arg name="ollama_model" default="llava:7b"/>
   <arg name="use_image" default="true"/>

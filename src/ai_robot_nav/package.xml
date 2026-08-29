@@ -17,6 +17,8 @@
   <exec_depend>roslaunch</exec_depend>
   <exec_depend>python3-requests</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
+  <!-- 车辆描述与 cafe 仿真环境，由 sim.launch / real.launch 引用 -->
+  <exec_depend>tjark_agv</exec_depend>
 
   <export>
   </export>

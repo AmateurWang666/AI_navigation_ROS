@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# 仿真 + 导航一键启动（单终端，推荐日常使用）。
+# cafe 仿真 + AI 导航一键启动。
 #
-#   bash scripts/sim.sh              # 无 GUI，空场景，带 AI 导航
+#   bash scripts/sim.sh              # 单终端全流程，无 Gazebo 窗口
 #   bash scripts/sim.sh --lidar      # 不调用 Ollama，纯激光（更少日志）
 #   bash scripts/sim.sh --gui        # 带 Gazebo 窗口（WSL 较慢）
 #   bash scripts/sim.sh --verbose    # 显示 Gazebo 相机 DEBUG（默认已静音）
 #
+#   bash scripts/sim.sh gazebo       # 只起仿真（终端 1）
+#   bash scripts/sim.sh nav          # 只起导航（终端 2，自动等 /scan）
 #   bash scripts/sim.sh stop         # 停止仿真
 
 set -o pipefail
@@ -19,7 +21,7 @@ MODE=full
 VERBOSE=false
 
 usage() {
-    sed -n '2,11p' "$0"
+    sed -n '2,13p' "$0"
     exit "${1:-0}"
 }
 
@@ -56,7 +58,7 @@ setup_logging() {
 
 print_banner() {
     echo "=============================================="
-    echo "  仿真已启动（默认无 Gazebo 窗口 = 正常）"
+    echo "  cafe 仿真已启动（默认无 Gazebo 窗口 = 正常）"
     echo "  成功标志：日志出现"
     echo "    FORWARD lin=0.15 ang=0.00 | clear ahead"
     echo "  另开终端看位移："
@@ -69,9 +71,9 @@ print_banner() {
 
 stop_sim() {
     echo "=== stopping simulation ==="
-    pkill -f 'roslaunch ai_robot_nav sim_full.launch' 2>/dev/null || true
-    pkill -f 'roslaunch ai_robot_nav tjark_gazebo.launch' 2>/dev/null || true
+    pkill -f 'roslaunch ai_robot_nav sim.launch' 2>/dev/null || true
     pkill -f 'roslaunch ai_robot_nav ai_nav.launch' 2>/dev/null || true
+    pkill -f 'roslaunch tjark_agv cafe_world.launch' 2>/dev/null || true
     pkill -f gzserver 2>/dev/null || true
     pkill -f gzclient 2>/dev/null || true
     sleep 1
@@ -102,16 +104,12 @@ case "$MODE" in
     gazebo)
         stop_sim
         if [ "$HEADLESS" = true ]; then
-            print_banner
+            echo "=== cafe world (headless); 终端 2 请运行: bash scripts/sim.sh nav ==="
         else
-            echo "=============================================="
-            echo "  正在启动 Gazebo 图形界面（请等待窗口弹出）"
-            echo "  首次打开可能需要 1–2 分钟"
-            echo "  终端 2 请在看到窗口后再运行: bash scripts/sim.sh nav"
-            echo "=============================================="
-            echo
+            echo "=== 正在启动 Gazebo 图形界面，等窗口弹出后再开终端 2 ==="
         fi
-        exec roslaunch ai_robot_nav tjark_gazebo.launch \
+        echo
+        exec roslaunch tjark_agv cafe_world.launch \
             headless:="$HEADLESS" \
             gui:="$([ "$HEADLESS" = true ] && echo false || echo true)"
         ;;
@@ -125,7 +123,7 @@ case "$MODE" in
     full)
         stop_sim
         print_banner
-        exec roslaunch ai_robot_nav sim_full.launch \
+        exec roslaunch ai_robot_nav sim.launch \
             headless:="$HEADLESS" \
             gui:="$([ "$HEADLESS" = true ] && echo false || echo true)" \
             use_image:="$USE_IMAGE"

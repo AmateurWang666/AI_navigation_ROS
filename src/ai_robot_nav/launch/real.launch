@@ -1,0 +1,33 @@
+<!--
+  实车入口：与 sim.launch 结构对称，只是把 Gazebo 换成真实硬件驱动。
+
+    roslaunch ai_robot_nav real.launch
+
+  仿真与实车共用同一份 URDF（tjark_agv/launch/description.launch）、同一份导航
+  节点、同一份参数文件。因此从仿真挪到实车不需要改导航代码，需要做的只有两件事：
+
+  1. 在下面标着「硬件驱动」的位置挂上底盘、雷达、相机三个驱动，让它们发布
+     nav_params.yaml 里约定的话题（/scan、/my_camera/color/image_raw）并订阅
+     /cmd_vel（geometry_msgs/Twist）。话题名不一致时改 yaml，不要改代码。
+  2. 按 docs/real_robot.md 逐项重标定速度与安全距离，仿真里的取值只是保守初值。
+
+  实车必须复核的两点：
+  - front_center_angle：仿真中雷达绕 z 轴装反 180°，故正前方在扫描角 180°。
+    实车雷达安装角若不同，这个值就要改，否则左右会整体反过来。
+  - escape_reverse_time：脱困动作会短暂后退，而本车雷达只有前向 180° 视场，
+    后方是盲区。实车若无后向传感器或防撞条，请置 0 关闭该动作。
+-->
+<launch>
+  <arg name="use_image" default="true"/>
+  <arg name="params_file" default="$(find ai_robot_nav)/config/nav_params.yaml"/>
+
+  <include file="$(find tjark_agv)/launch/description.launch"/>
+
+  <!-- 硬件驱动：底盘 / 雷达 / 相机。上车前在此挂载。 -->
+
+  <include file="$(find ai_robot_nav)/launch/ai_nav.launch">
+    <arg name="use_sim_time" value="false"/>
+    <arg name="use_image" value="$(arg use_image)"/>
+    <arg name="params_file" value="$(arg params_file)"/>
+  </include>
+</launch>

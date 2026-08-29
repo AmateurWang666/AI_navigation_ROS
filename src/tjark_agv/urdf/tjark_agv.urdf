@@ -1,0 +1,292 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot name="tjark_agv">
+  <link name="base_link">
+    <visual>
+      <origin xyz="0.01753 -0.496305 0" rpy="0 0 3.14159265" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/base_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0.01753 -0.496305 0" rpy="0 0 3.14159265" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="base_body">
+    <inertial>
+      <origin xyz="-0.0625397761464612 -0.0617890042368707 -0.0890930358739272" rpy="0 0 0" />
+      <mass value="5.86157279552131" />
+      <inertia ixx="0.0135388124689225" ixy="1.4051306818933E-05" ixz="-1.66037891384612E-05" iyy="0.0229000846382633" iyz="0.000162706625260158" izz="0.0174489188147559" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/base_body.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/base_body.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="body_to_base" type="fixed">
+    <origin xyz="-0.073500 -0.057038 0.052880" rpy="1.570796 0 4.712389" />
+    <parent link="base_link" />
+    <child link="base_body" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="laser">
+    <inertial>
+      <origin xyz="-0.00174086748706212 -3.12623898990338E-09 -0.0101893314213834" rpy="0 0 0" />
+      <mass value="0.219154500646501" />
+      <inertia ixx="0.000164971113270255" ixy="2.80630614931539E-11" ixz="-7.11310388791941E-07" iyy="0.000170626960543283" iyz="3.42457934856856E-11" izz="0.000110987626865618" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 3.1416" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/laser_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 3.1416" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/laser_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="laser_to_body" type="fixed">
+    <origin xyz="-0.057039 -0.041697 -0.23945" rpy="1.5708 -1.5708 3.14159" />
+    <parent link="base_body" />
+    <child link="laser" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="camera_link">
+    <inertial>
+      <origin xyz="-0.000109028123903232 0.000188157745037734 0.00329381778037804" rpy="0 0 0" />
+      <mass value="0.198968145464809" />
+      <inertia ixx="0.000101594028649237" ixy="3.64921563400389E-07" ixz="1.28233782193605E-06" iyy="0.000467759482609897" iyz="-1.228246356247E-05" izz="0.000431155075123243" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/camera_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/camera_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="camera_to_body" type="fixed">
+    <origin xyz="-0.0570392490056422 0.113953403537498 -0.192999999999999" rpy="-1.5707963267949 0 3.14159265358979" />
+    <parent link="base_body" />
+    <child link="camera_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="left_wheel">
+    <inertial>
+      <origin xyz="3.32003410137387E-05 1.47427065758099E-06 0.0206360203406354" rpy="0 0 0" />
+      <mass value="0.223430950895449" />
+      <inertia ixx="0.000335456894762655" ixy="3.8449253597207E-09" ixz="-2.4684661348122E-09" iyy="0.00033531738326045" iyz="-1.1905121645767E-10" izz="0.000619591424139698" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.04" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/left_wheel.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.04" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/left_wheel.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="left_to_base" type="continuous">
+    <origin xyz="0 0.192205 -0.12182" rpy="1.5708 0 3.14159265" />
+    <parent link="base_link" />
+    <child link="left_wheel" />
+    <axis xyz="0 0 1" />
+  </joint>
+
+  <link name="right_wheel">
+    <inertial>
+      <origin xyz="-3.31951458207025E-05 1.58725489640688E-06 -0.0206360203414102" rpy="0 0 0" />
+      <mass value="0.223430950718916" />
+      <inertia ixx="0.000335456866973021" ixy="-4.31963414625839E-09" ixz="-2.46806031119726E-09" iyy="0.000335317411029562" iyz="1.27480077913439E-10" izz="0.0006195914241366" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.04" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/right_wheel.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.04" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/right_wheel.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="right_to_base" type="continuous">
+    <origin xyz="0 -0.192205 -0.12182" rpy="1.5708 0 3.14159265" />
+    <parent link="base_link" />
+    <child link="right_wheel" />
+    <axis xyz="0 0 1" />
+  </joint>
+
+  <link name="RF_link">
+    <inertial>
+      <origin xyz="-0.000128033411647507 0.0184859887776221 0.0304465357447478" rpy="0 0 0" />
+      <mass value="0.0760737664029981" />
+      <inertia ixx="5.5057609994028E-05" ixy="8.34335786410532E-08" ixz="1.1743452062678E-07" iyy="4.00423340871853E-05" iyz="-1.5107283917568E-05" izz="3.51643333652178E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/RF_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/RF_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="RF_to_base" type="fixed">
+    <origin xyz="0.138 -0.093995 -0.11632" rpy="-3.1416 0 1.57079" />
+    <parent link="base_link" />
+    <child link="RF_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="RB_link">
+    <inertial>
+      <origin xyz="0.000128033411647521 -0.0184859887776221 0.0304465357447477" rpy="0 0 0" />
+      <mass value="0.0760737664029981" />
+      <inertia ixx="5.50576099940281E-05" ixy="8.34335786410261E-08" ixz="-1.17434520626753E-07" iyy="4.00423340871853E-05" iyz="1.51072839175681E-05" izz="3.51643333652178E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/RB_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/RB_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="RB_to_base" type="fixed">
+    <origin xyz="-0.138 -0.093995 -0.11632" rpy="3.1416 0 1.57079" />
+    <parent link="base_link" />
+    <child link="RB_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="LF_link">
+    <inertial>
+      <origin xyz="-0.000128033411647424 0.0184859887776221 0.0304465357447477" rpy="0 0 0" />
+      <mass value="0.0760737664029972" />
+      <inertia ixx="5.50576099940275E-05" ixy="8.34335786409445E-08" ixz="1.17434520626658E-07" iyy="4.00423340871849E-05" iyz="-1.51072839175678E-05" izz="3.51643333652174E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/LF_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/LF_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="LF_to_base" type="fixed">
+    <origin xyz="0.138 0.094005 -0.11632" rpy="-3.1416 0 1.57079" />
+    <parent link="base_link" />
+    <child link="LF_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="LB_link">
+    <inertial>
+      <origin xyz="-0.000128033411647521 0.0304465357447476 -0.018485988777622" rpy="0 0 0" />
+      <mass value="0.0760737664029976" />
+      <inertia ixx="5.50576099940275E-05" ixy="1.17434520626629E-07" ixz="-8.34335786409097E-08" iyy="3.51643333652174E-05" iyz="1.51072839175678E-05" izz="4.0042334087185E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/LB_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://tjark_agv/meshes/LB_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="LB_to_base" type="fixed">
+    <origin xyz="-0.138 0.094005 -0.11632" rpy="-1.5708 0 4.71239" />
+    <parent link="base_link" />
+    <child link="LB_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+
+</robot>
