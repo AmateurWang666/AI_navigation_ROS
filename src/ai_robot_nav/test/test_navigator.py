@@ -180,3 +180,68 @@ def test_near_wall_locks_turn_direction():
 
     right = plan(0.30, 1.00, 1.05, CFG, last_turn='TURN_RIGHT')
     assert right.action == 'TURN_RIGHT'
+
+
+def test_long_turn_commits_to_the_latched_side():
+    """转了很久之后，方向锁死，连"另一侧明显更开阔"也不再改变它。
+
+    这一条针对的正是贴墙摆头：只要还允许换边，两侧读数在转动过程中不断变化，
+    机器人就会一直改主意。转过 escape_commit_time 之后，把"选边"这件事整个关掉。
+    """
+    elapsed = CFG.escape_commit_time + 0.5
+    result = plan(0.30, 0.4, 3.0, CFG, last_turn='TURN_LEFT', turn_elapsed=elapsed)
+    assert result.action == 'TURN_LEFT'
+    assert result.angular_z > 0.0
+    assert 'committed' in result.reason
+
+
+def test_commit_needs_a_latched_side_to_act_on():
+    """没有历史方向时，锁定无从生效，仍按左右比较来选边。"""
+    result = plan(0.30, 0.4, 3.0, CFG, turn_elapsed=CFG.escape_commit_time + 0.5)
+    assert result.action == 'TURN_RIGHT'
+
+
+def test_stuck_turning_backs_out_while_turning():
+    """转到 escape_reverse_time 还没脱困，说明车头已经顶住了，必须退出来。
+
+    纯原地转向对差速底盘几乎总能脱困，唯一的例外是车头已经贴在障碍上、轮子只在
+    空转。此时给一个很小的负线速度把车头拽离障碍，角速度保持不变。
+    """
+    result = plan(0.30, 0.4, 0.4, CFG,
+                  last_turn='TURN_LEFT', turn_elapsed=CFG.escape_reverse_time + 0.5)
+    assert result.action == 'ESCAPE_LEFT'
+    assert result.linear_x == pytest.approx(-CFG.reverse_speed)
+    assert result.angular_z > 0.0
+
+
+def test_escape_action_keeps_the_direction_sign_invariant():
+    """ESCAPE_* 同样遵守"动作名与角速度符号一致"这条不变式。"""
+    elapsed = CFG.escape_reverse_time + 0.5
+    left = plan(0.30, 3.0, 0.4, CFG, last_turn='TURN_LEFT', turn_elapsed=elapsed)
+    right = plan(0.30, 0.4, 3.0, CFG, last_turn='TURN_RIGHT', turn_elapsed=elapsed)
+    assert (left.action, left.angular_z > 0.0) == ('ESCAPE_LEFT', True)
+    assert (right.action, right.angular_z < 0.0) == ('ESCAPE_RIGHT', True)
+
+
+def test_escape_history_is_interchangeable_with_turn_history():
+    """ESCAPE_* 也要能当作"上次往哪边转"，否则脱困动作自己会打断方向锁存。"""
+    result = plan(0.30, 1.00, 1.05, CFG, last_turn='ESCAPE_LEFT')
+    assert result.action == 'TURN_LEFT'
+
+    held = plan(0.59, 1.0, 1.0, CFG, last_action='ESCAPE_RIGHT')
+    assert held.action == 'TURN_RIGHT'          # 迟滞带内不得跳回 FORWARD
+
+
+def test_escape_stays_off_until_the_timers_expire():
+    """计时未到时行为与改动前完全一致，脱困逻辑不影响正常避障。"""
+    assert plan(0.30, 3.0, 0.4, CFG, last_turn='TURN_RIGHT').action == 'TURN_LEFT'
+    assert plan(0.30, 3.0, 0.4, CFG, turn_elapsed=CFG.escape_commit_time - 0.1).linear_x \
+        == pytest.approx(0.0)
+
+
+def test_escape_timers_can_be_disabled():
+    """两个计时器置 0 即完全关闭，实车调试初期可以先要求纯原地转向。"""
+    cfg = CFG._replace(escape_commit_time=0.0, escape_reverse_time=0.0)
+    result = plan(0.30, 0.4, 3.0, cfg, last_turn='TURN_LEFT', turn_elapsed=60.0)
+    assert result.action == 'TURN_RIGHT'
+    assert result.linear_x == pytest.approx(0.0)

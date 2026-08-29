@@ -17,7 +17,7 @@ from ai_robot_nav.llm_client import (
 )
 from ai_robot_nav.log_throttle import LogThrottle
 from ai_robot_nav.motion import clamp
-from ai_robot_nav.navigator import NavConfig, plan
+from ai_robot_nav.navigator import TURNING_ACTIONS, NavConfig, plan
 from ai_robot_nav.ros_params import param, param_bool, param_float, param_int
 from ai_robot_nav.scan_utils import describe_environment, format_distance
 
@@ -74,6 +74,12 @@ class AINavNode:
         self._caution_streak = 0
         self._last_vision_log = None
 
+        # 转向状态。方向要跨越 FORWARD 阶段保留，否则一次避障中间只要有一帧
+        # 直行，方向就被清空、下一帧重新选边，机器人便在原地摆头。
+        self._turn_side = None
+        self._turn_side_time = 0.0
+        self._turn_started = None
+
         self._cmd_publisher = rospy.Publisher(self._cmd_topic, Twist, queue_size=10)
         self._scan_sub = rospy.Subscriber(
             self._scan_topic, LaserScan, self._scan_callback, queue_size=1)
@@ -120,13 +126,13 @@ class AINavNode:
         self._jpeg_quality = param_int('jpeg_quality', 60)
         self._front_half_angle = param_float('front_half_angle', 30.0)
         self._front_center_angle = param_float('front_center_angle', 0.0)
-        self._rear_center_angle = param_float('rear_center_angle', 180.0)
         self._side_center_angle = param_float('side_center_angle', 90.0)
         self._side_half_angle = param_float('side_half_angle', 30.0)
         self._max_linear = param_float('max_linear', 0.22)
         self._max_angular = param_float('max_angular', 1.5)
         self._lidar_only_fallback = param_bool('lidar_only_fallback', True)
         self._caution_confirmations = max(1, param_int('caution_confirmations', 2))
+        self._turn_latch_timeout = max(0.0, param_float('turn_latch_timeout', 3.0))
 
         forward_clearance = param_float('forward_clearance', 0.6)
         turn_clearance = param_float('turn_clearance', 0.5)
@@ -146,6 +152,8 @@ class AINavNode:
             trapped_distance=param_float('trapped_distance', 0.4),
             tie_threshold=param_float('tie_threshold', 0.3),
             caution_scale=param_float('caution_scale', 0.5),
+            escape_commit_time=param_float('escape_commit_time', 4.0),
+            escape_reverse_time=param_float('escape_reverse_time', 9.0),
         )
 
     def _scan_callback(self, msg: LaserScan):
@@ -187,7 +195,7 @@ class AINavNode:
 
         front, left, right, _rear = describe_environment(
             scan, self._front_half_angle, self._side_center_angle, self._side_half_angle,
-            self._front_center_angle, self._rear_center_angle)
+            self._front_center_angle)
         image_b64 = self._encode_image(image)
         if image_b64 is None:
             return
@@ -220,7 +228,7 @@ class AINavNode:
 
         front, left, right, rear = describe_environment(
             scan, self._front_half_angle, self._side_center_angle, self._side_half_angle,
-            self._front_center_angle, self._rear_center_angle)
+            self._front_center_angle)
         assessment = self._fresh_assessment(now)
 
         if assessment is None and not self._lidar_only_fallback:
@@ -231,11 +239,16 @@ class AINavNode:
             self._publish_stop()
             return
 
+        # 转向计时走 ROS 时间而非墙钟：仿真里 Gazebo 常慢于实时，用墙钟会让
+        # escape_* 两个阈值对应的实际转角比配置的更小，仿真与实车行为就对不上了。
+        ros_now = now.to_sec()
         decision = plan(
             front, left, right, self._nav_config, assessment,
-            last_action=self._last_plan_action, rear=rear)
+            last_turn=self._turn_side, last_action=self._last_plan_action,
+            rear=rear, turn_elapsed=self._turn_elapsed(ros_now))
 
         self._last_plan_action = decision.action
+        self._track_turn_state(decision.action, ros_now)
 
         command = Twist()
         command.linear.x = clamp(decision.linear_x, self._max_linear)
@@ -246,6 +259,7 @@ class AINavNode:
         signature = (
             decision.action, round(command.linear.x, 3),
             round(command.angular.z, 3), vision)
+        # 日志节流用墙钟：仿真暂停时 ROS 时间不走，否则日志会跟着一起冻住。
         wall_now = time.monotonic()
         if signature != self._last_log_signature or wall_now - self._last_log_time >= 2.0:
             rospy.loginfo(
@@ -253,6 +267,38 @@ class AINavNode:
                 f'ang={command.angular.z:.2f} [vision={vision}] | {decision.reason}')
             self._last_log_signature = signature
             self._last_log_time = wall_now
+
+    def _turn_elapsed(self, ros_now: float) -> float:
+        """已经**连续**转向了多少秒。中间只要有一帧不是转向就归零。
+
+        刻意只统计连续转向：脱困动作会短暂后退，代价不小，只应在「明明一直在转却
+        转不出去」时触发。转向与直行交替出现说明机器人在正常绕障、确有位移，那种
+        情况不该按卡死处理。
+        """
+        if self._turn_started is None:
+            return 0.0
+        return ros_now - self._turn_started
+
+    def _track_turn_state(self, action: str, ros_now: float):
+        """维护转向计时与方向锁存。
+
+        方向锁存与上面的计时不同，它刻意跨越直行帧，停止转向后再保留
+        ``turn_latch_timeout`` 秒：一次避障往往是「转一点 → 前方够宽了就直行 →
+        又不够了继续转」，锁存必须活过中间的直行帧，否则每次都重新选边，左右读数
+        一变机器人就改主意，于是原地摆头。超时后清空，避免几分钟前的一次转向长期
+        给策略施加偏置。
+        """
+        if action in TURNING_ACTIONS:
+            if self._turn_started is None:
+                self._turn_started = ros_now
+            self._turn_side = action
+            self._turn_side_time = ros_now
+            return
+
+        self._turn_started = None
+        if (self._turn_side is not None
+                and ros_now - self._turn_side_time > self._turn_latch_timeout):
+            self._turn_side = None
 
     def _snapshot(self):
         with self._lock:

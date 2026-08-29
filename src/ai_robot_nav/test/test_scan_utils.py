@@ -125,6 +125,45 @@ def test_describe_environment_orders_front_left_right():
     assert rear == pytest.approx(1.0)
 
 
+def test_mounting_offset_rotates_all_four_sectors_together():
+    """雷达装偏时，左右后三个扇区必须跟着前方一起转，否则左右会整体互换。
+
+    这条曾经真实地漏掉过：偏移只加在前方扇区上，侧向仍按 ±90° 取，于是 tjark_agv
+    上算出来的"左"其实是车体右侧。机器人因此朝更封闭的一侧转，贴墙时左右摆头。
+    """
+    scan = turtlebot_scan()
+    scan.ranges[180] = 0.6   # 偏移 180° 后的车体正前方
+    scan.ranges[270] = 1.2   # 车体左侧
+    scan.ranges[90] = 2.4    # 车体右侧
+    scan.ranges[0] = 1.0     # 车体正后方
+    front, left, right, rear = describe_environment(
+        scan, 30.0, 90.0, 30.0, front_center_deg=180.0)
+    assert front == pytest.approx(0.6)
+    assert left == pytest.approx(1.2)
+    assert right == pytest.approx(2.4)
+    assert rear == pytest.approx(1.0)
+
+
+def test_tjark_half_field_of_view_maps_left_and_right_correctly():
+    """tjark_agv 的真实布局：180° 视场、扫描角 90°–270°、正前方在 180°。
+
+    这个布局下扫描角 90° 指向车体右侧、270° 指向车体左侧（tf 实测雷达绕 z 轴
+    装反 180°）。视场外的正后方没有任何采样点，必须报盲区而不是空旷。
+    """
+    increment = math.pi / 359.0                       # 360 点铺满 90°–270°
+    scan = make_scan([3.0] * 360, angle_min=math.pi / 2.0, angle_increment=increment)
+    scan.ranges[180] = 0.6                            # 扫描角 180° = 车体正前方
+    scan.ranges[359] = 1.2                            # 扫描角 270° = 车体左侧
+    scan.ranges[0] = 2.4                              # 扫描角  90° = 车体右侧
+
+    front, left, right, rear = describe_environment(
+        scan, 20.0, 90.0, 20.0, front_center_deg=180.0)
+    assert front == pytest.approx(0.6)
+    assert left == pytest.approx(1.2)
+    assert right == pytest.approx(2.4)
+    assert rear is None
+
+
 def test_format_distance_spells_out_the_blind_case():
     """盲区必须在提示词里写成文字，不能伪装成一个数字距离。"""
     assert format_distance(1.234) == '1.23m'

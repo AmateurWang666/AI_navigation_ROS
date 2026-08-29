@@ -16,25 +16,33 @@ from typing import NamedTuple, Optional, Tuple
 # 比较链保持单一类型，不必到处插入 None 判断。
 BLOCKED_AHEAD = 0.0
 
+# 动作名与转向侧的对应表。ESCAPE_* 是"边退边转"的脱困动作，方向语义与同侧的
+# TURN_* 完全一致，因此在需要判断"上次往哪边转"的地方两者可以互换。
+LEFT_ACTIONS = ('TURN_LEFT', 'ESCAPE_LEFT')
+RIGHT_ACTIONS = ('TURN_RIGHT', 'ESCAPE_RIGHT')
+TURNING_ACTIONS = LEFT_ACTIONS + RIGHT_ACTIONS
+
 
 class NavConfig(NamedTuple):
-    """策略的全部可调参数。默认值对应 TurtleBot3 在 Gazebo 中的实测表现。"""
+    """策略的全部可调参数。实车与仿真共用，差异只体现在 yaml 里的取值。"""
 
     cruise_speed: float = 0.18        # 前方开阔时的直行速度（m/s）
     turn_speed: float = 0.5           # 前方受阻时的原地转向角速度（rad/s）
-    reverse_speed: float = 0.08       # 三面受困时的后退速度（m/s），刻意最慢
+    reverse_speed: float = 0.08       # 后退速度（m/s），刻意最慢
     reverse_clearance: float = 0.4    # 后方净空不足时不盲退（m）
     forward_clearance: float = 0.6    # 恢复直行所需的前方净空（m）
     turn_clearance: float = 0.5       # 开始转向所需的前方净空（m），与上行形成迟滞带
     trapped_distance: float = 0.4     # 三面均低于此值即判定被困（m）
     tie_threshold: float = 0.3        # 左右差值小于此值视为平局，启用方向保持（m）
     caution_scale: float = 0.5        # 视觉报 CAUTION 时的巡航降速倍率，恒小于 1
+    escape_commit_time: float = 4.0   # 连续转向超过此时长后锁死方向（s），0 关闭
+    escape_reverse_time: float = 9.0  # 再超过此时长改为边退边转（s），0 关闭
 
 
 class Plan(NamedTuple):
     """一次决策的结果。``reason`` 只进日志，用于事后复盘机器人为什么这么走。"""
 
-    action: str        # FORWARD / TURN_LEFT / TURN_RIGHT / REVERSE
+    action: str        # FORWARD / TURN_LEFT / TURN_RIGHT / ESCAPE_* / REVERSE
     linear_x: float
     angular_z: float
     reason: str
@@ -56,6 +64,15 @@ def _effective_tie_threshold(ahead: float, config: NavConfig) -> float:
     return config.tie_threshold
 
 
+def _latched_side(action: Optional[str]) -> Optional[bool]:
+    """把上一次的动作名折算成"左/右"。非转向动作返回 None。"""
+    if action in LEFT_ACTIONS:
+        return True
+    if action in RIGHT_ACTIONS:
+        return False
+    return None
+
+
 def _choose_turn_side(
     to_left: float,
     to_right: float,
@@ -63,12 +80,23 @@ def _choose_turn_side(
     preference: str,
     last_turn: Optional[str],
     tie_threshold: Optional[float] = None,
+    committed: bool = False,
 ) -> Tuple[bool, str]:
     """在需要转向时选定左右，带死区与方向保持。
 
     明显更优的一侧（差距超过 tie_threshold）始终优先；落在死区内时不再用
     ``>=`` 裸比较，而是保持上次转向、听视觉偏好，或确定性默认左转。
+
+    ``committed`` 为真时完全跳过左右比较，直接沿用已锁定的方向。这条路径只在
+    机器人已经连续转了很久（见 ``escape_commit_time``）时启用：此时"哪边更开阔"
+    显然没能把它带出来，继续跟着这个量走只会让它在两侧之间反复改主意。
     """
+    if committed:
+        latched = _latched_side(last_turn)
+        if latched is not None:
+            side = 'left' if latched else 'right'
+            return latched, f'committed {side} (escape in progress)'
+
     threshold = config.tie_threshold if tie_threshold is None else tie_threshold
     diff = to_left - to_right
 
@@ -81,10 +109,11 @@ def _choose_turn_side(
         return True, f'sides within {threshold:.2f}m, vision prefers left'
     if preference == 'RIGHT':
         return False, f'sides within {threshold:.2f}m, vision prefers right'
-    if last_turn == 'TURN_LEFT':
-        return True, f'sides within {threshold:.2f}m, holding left'
-    if last_turn == 'TURN_RIGHT':
-        return False, f'sides within {threshold:.2f}m, holding right'
+
+    latched = _latched_side(last_turn)
+    if latched is not None:
+        side = 'left' if latched else 'right'
+        return latched, f'sides within {threshold:.2f}m, holding {side}'
 
     return True, f'sides within {threshold:.2f}m, defaulting left'
 
@@ -96,7 +125,7 @@ def _effective_last_action(
     """合并上一周期的动作状态，兼容只传 last_turn 的调用方式。"""
     if last_action is not None:
         return last_action
-    if last_turn in ('TURN_LEFT', 'TURN_RIGHT'):
+    if last_turn in TURNING_ACTIONS:
         return last_turn
     return None
 
@@ -117,7 +146,7 @@ def _should_drive_forward(
         return False
     if last_action == 'FORWARD':
         return True
-    if last_action in ('TURN_LEFT', 'TURN_RIGHT'):
+    if last_action in TURNING_ACTIONS:
         return False
     return False
 
@@ -140,6 +169,38 @@ def _rear_safe(rear, config: NavConfig) -> bool:
     return _usable(rear) >= config.reverse_clearance
 
 
+def _turn_plan(
+    go_left: bool,
+    basis: str,
+    config: NavConfig,
+    turning_for: float,
+    prefix: str,
+) -> Plan:
+    """生成转向动作；转了太久就升级为"边退边转"。
+
+    纯原地转向对一台差速+万向轮底盘几乎总能脱困，除非车头已经顶在障碍上——
+    此时轮子只会空转。给一个很小的负向线速度把车头拽离障碍，同时保持角速度，
+    机器人就会沿倒车弧线退出来，而方向仍是已锁定的那一侧。
+    """
+    angular = config.turn_speed if go_left else -config.turn_speed   # REP-103：左正右负
+
+    if config.escape_reverse_time > 0.0 and turning_for >= config.escape_reverse_time:
+        return Plan(
+            'ESCAPE_LEFT' if go_left else 'ESCAPE_RIGHT',
+            -config.reverse_speed,
+            angular,
+            f'{prefix}; turning for {turning_for:.1f}s without clearing, '
+            f'backing out while turning toward {basis}')
+
+    # 动作名与角速度符号在同一个表达式里产生，两者结构上不可能不一致。
+    # （曾经把方向交给模型输出时，正是这里出现过"说左转、却给了右转角速度"。）
+    return Plan(
+        'TURN_LEFT' if go_left else 'TURN_RIGHT',
+        0.0,
+        angular,
+        f'{prefix}; turning toward {basis}')
+
+
 def plan(
     front,
     left,
@@ -149,23 +210,33 @@ def plan(
     last_turn: Optional[str] = None,
     last_action: Optional[str] = None,
     rear=None,
+    turn_elapsed: float = 0.0,
 ) -> Plan:
     """根据三个扇区距离选定动作，视觉提示仅用于收紧结果。
 
     下面的判断顺序本身就是优先级：先处理被困（唯一会给出负向速度的分支），
     再看能否直行，最后才决定往哪一侧转。
+
+    ``turn_elapsed`` 是调用方测得的"已经连续转向多少秒"。时间不在本模块里读取，
+    策略因此保持纯函数、可复现、可单测；它只是又一个输入量。
     """
     ahead = _usable(front)
     to_left = _usable(left)
     to_right = _usable(right)
+    turning_for = max(0.0, turn_elapsed)
 
     # 没有提示时代入中性值，效果与"模型认为一切正常"完全一致。因此模型缺席、
     # 超时或被拒绝时，本函数的行为就是纯激光导航，不需要另一条代码路径。
     hazard = hint.hazard if hint is not None else 'NONE'
     preference = hint.preferred_direction if hint is not None else 'NONE'
     prior_action = _effective_last_action(last_action, last_turn)
-    if last_turn is None and prior_action in ('TURN_LEFT', 'TURN_RIGHT'):
+    if last_turn is None and prior_action in TURNING_ACTIONS:
         last_turn = prior_action
+
+    # 转了很久还没转出去，说明"哪边更开阔"这个量在当前位置没有指导意义，
+    # 锁死已选方向直到脱困为止。
+    committed = (config.escape_commit_time > 0.0
+                 and turning_for >= config.escape_commit_time)
 
     if config.turn_clearance >= config.forward_clearance:
         config = config._replace(turn_clearance=config.forward_clearance - 0.05)
@@ -186,13 +257,12 @@ def plan(
                 f'rear clear ({_usable(rear):.2f}m)')
         go_left, basis = _choose_turn_side(
             to_left, to_right, config, preference, last_turn,
-            tie_threshold=_effective_tie_threshold(ahead, config))
+            tie_threshold=_effective_tie_threshold(ahead, config),
+            committed=committed)
         rear_note = 'blind' if rear is None else f'{_usable(rear):.2f}m'
-        return Plan(
-            'TURN_LEFT' if go_left else 'TURN_RIGHT',
-            0.0,
-            config.turn_speed if go_left else -config.turn_speed,
-            f'boxed in but rear blocked ({rear_note}); turning toward {basis}')
+        return _turn_plan(
+            go_left, basis, config, turning_for,
+            f'boxed in but rear blocked ({rear_note})')
 
     if _should_drive_forward(ahead, config, prior_action):
         extra = ''
@@ -205,12 +275,8 @@ def plan(
     # 上次方向，避免 10 Hz 控制回路因测量噪声在左右之间来回切换。
     go_left, basis = _choose_turn_side(
         to_left, to_right, config, preference, last_turn,
-        tie_threshold=_effective_tie_threshold(ahead, config))
+        tie_threshold=_effective_tie_threshold(ahead, config),
+        committed=committed)
 
-    # 动作名与角速度符号在同一个表达式里产生，两者结构上不可能不一致。
-    # （曾经把方向交给模型输出时，正是这里出现过"说左转、却给了右转角速度"。）
-    return Plan(
-        'TURN_LEFT' if go_left else 'TURN_RIGHT',
-        0.0,
-        config.turn_speed if go_left else -config.turn_speed,   # REP-103：左正右负
-        f'obstacle ahead ({ahead:.2f}m); turning toward {basis}')
+    return _turn_plan(
+        go_left, basis, config, turning_for, f'obstacle ahead ({ahead:.2f}m)')
