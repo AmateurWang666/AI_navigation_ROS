@@ -1,3 +1,0 @@
-# 单元测试依赖（算法层测试不需要 rospy / roslaunch）。
-# sensor_msgs 由已安装的 ROS 提供；本文件只列 pip 侧依赖。
-pytest>=7.0

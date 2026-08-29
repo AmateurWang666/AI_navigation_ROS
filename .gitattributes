@@ -18,7 +18,10 @@
 *.world text eol=lf
 *.sdf text eol=lf
 *.config text eol=lf
+*.txt text eol=lf
+CMakeLists.txt text eol=lf
 .gitignore text eol=lf
+.gitattributes text eol=lf
 
 # 网格与贴图是二进制，不要做行尾转换
 *.STL binary
