@@ -1,0 +1,71 @@
+<!--
+  建图：在仿真或实车环境里跑一圈，生成一张 ROS 标准地图。
+
+    roslaunch ai_robot_nav mapping.launch                  # cafe 仿真里建图
+    roslaunch ai_robot_nav mapping.launch world_name:=/路径/我的世界.world
+
+  机器人靠本项目原有的反应式漫游层自己游走避障，扫过的地方逐步成图。
+  另开一个终端看进度，覆盖率不再增长时存盘：
+
+    rosrun map_server map_saver -f $(rospack find ai_robot_nav)/maps/我的地图
+
+  存出来的 .yaml + .pgm 就是标准地图，之后：
+
+    roslaunch ai_robot_nav sim.launch map_file:=/路径/我的地图.yaml
+
+  完整步骤与实车注意事项见 docs/mapping.md。
+-->
+<launch>
+  <arg name="gui" default="false"/>
+  <arg name="headless" default="true"/>
+  <arg name="simulation" default="true"/>
+  <arg name="params_file" default="$(find ai_robot_nav)/config/nav_params.yaml"/>
+
+  <arg name="world_name" default="$(find tjark_agv)/worlds/cafe.world"/>
+  <arg name="spawn_x" default="1.40"/>
+  <arg name="spawn_y" default="3.125"/>
+  <arg name="spawn_yaw" default="0.0"/>
+
+  <!--
+    栅格尺寸。默认 800x800 @ 0.05 m = 40x40 m，机器人位于正中。
+    环境更大就调大 width/height——超出范围的观测会被直接丢弃，
+    表现为地图边缘平白出现一圈永远填不上的未知区域。
+  -->
+  <arg name="resolution" default="0.05"/>
+  <arg name="width" default="800"/>
+  <arg name="height" default="800"/>
+
+  <!--
+    存盘位置，不带扩展名（与 map_saver -f 的约定一致，会写出 .pgm 和 .yaml）。
+    存到仓库里用：save_path:=$(find ai_robot_nav)/maps/我的地图
+  -->
+  <arg name="save_path" default="/tmp/my_map"/>
+
+  <include file="$(find tjark_agv)/launch/cafe_world.launch" if="$(arg simulation)">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="headless" value="$(arg headless)"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="world_name" value="$(arg world_name)"/>
+    <arg name="spawn_x" value="$(arg spawn_x)"/>
+    <arg name="spawn_y" value="$(arg spawn_y)"/>
+    <arg name="spawn_yaw" value="$(arg spawn_yaw)"/>
+  </include>
+
+  <!--
+    建图期间不加载地图、不做定位，只跑漫游层。use_image 关掉：视觉层只会让
+    机器人更保守（减速/停车），对建图没有帮助，却要占着 Ollama 和一份 CPU。
+  -->
+  <include file="$(find ai_robot_nav)/launch/ai_nav.launch">
+    <arg name="use_sim_time" value="$(arg simulation)"/>
+    <arg name="use_image" value="false"/>
+    <arg name="params_file" value="$(arg params_file)"/>
+    <arg name="idle_behavior" value="explore"/>
+  </include>
+
+  <node pkg="ai_robot_nav" type="mapper_node" name="mapper" output="screen">
+    <param name="resolution" value="$(arg resolution)"/>
+    <param name="width" value="$(arg width)"/>
+    <param name="height" value="$(arg height)"/>
+    <param name="save_path" value="$(arg save_path)"/>
+  </node>
+</launch>

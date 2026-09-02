@@ -1,0 +1,115 @@
+<!--
+  目标点导航层：用户地图 + AMCL 定位 + move_base 路径规划 + 指令仲裁。
+
+    roslaunch ai_robot_nav navigation.launch                        # 用内置 cafe 地图
+    roslaunch ai_robot_nav navigation.launch map_file:=/路径/我的地图.yaml
+
+  这一层和 ai_nav.launch 一样是平台无关的：仿真与实车共用，差别只在于由谁提供
+  /scan 与 /odom，以及 map -> odom 由谁修正。
+
+  ============================ 数据流 ============================
+
+    用户地图 ──► map_server ──► /map ─┐
+                                      ├──► move_base ──► /nav_cmd_vel ─┐
+    /scan + /odom ──► amcl ──► map→odom ┘                              │
+                                                                       ├──► nav_mux
+    ai_nav_node（反应式漫游）──────────────► /explore_cmd_vel ─────────┘
+                                                                       │
+                                                                       ▼
+                                                          /ai_cmd_vel ──► safety_node ──► /cmd_vel
+
+  注意 move_base 的输出被重映射到 /nav_cmd_vel，而不是它默认的 /cmd_vel。
+  本仓库有一条贯穿始终的不变式：safety_node 是 /cmd_vel 的唯一发布者。
+  让 move_base 直接发 /cmd_vel 就等于在安全层旁边开后门——它卡在恢复行为、
+  或者规划出一条贴墙路径时，将没有任何东西能拦住。急停权不下放。
+-->
+<launch>
+  <!-- ============================ 地图 ============================ -->
+  <!--
+    换成你自己的地图只需要改这一个参数。格式是 ROS 标准的 map_server 格式：
+    一个 .yaml 描述文件 + 一张 .pgm/.png 栅格图。用 gmapping、cartographer 或
+    任何其它工具建的图都可以直接用，不需要转换。
+    地图要求与生成方法见 docs/mapping.md。
+  -->
+  <arg name="map_file" default="$(find ai_robot_nav)/maps/cafe.yaml"/>
+
+  <!--
+    命名目的地表。留空则自动找地图旁边的同名文件（我的地图.destinations.yaml）。
+    目的地跟着地图走，换地图就换一套目的地，不会拿 A 图的坐标去 B 图导航。
+  -->
+  <arg name="destinations_file" default=""/>
+
+  <!-- ==================== 初始位姿（AMCL 的起点猜测）==================== -->
+  <!--
+    AMCL 需要一个初始位姿才能收敛。给错了机器人会定位到地图上的另一个地方，
+    表现为「一启动就朝墙走」。默认值对应 cafe 仿真里 tjark_agv 的出生点
+    （见 tjark_agv/launch/cafe_world.launch 的 spawn_x / spawn_y）。
+    换地图或换出生点时必须一起改，也可以在 RViz 里用 2D Pose Estimate 手动纠正。
+  -->
+  <arg name="initial_pose_x" default="1.40"/>
+  <arg name="initial_pose_y" default="3.125"/>
+  <arg name="initial_pose_a" default="0.0"/>
+
+  <arg name="params_file" default="$(find ai_robot_nav)/config/nav_params.yaml"/>
+
+  <!--
+    参数在 launch 层加载而不是塞进 <node> 里。nav_params.yaml 的顶层键就是节点名
+    （ai_nav_node: / safety_node: / nav_mux:），在全局命名空间展开后正好落成
+    /nav_mux/xxx，也就是 nav_mux 节点的私有参数。若改成在 <node> 内部加载，
+    会多套一层变成 /nav_mux/nav_mux/xxx，节点读不到，然后全部静默用默认值。
+    与 ai_nav.launch 重复加载同一个文件是无害的，取值完全相同。
+  -->
+  <rosparam file="$(arg params_file)" command="load"/>
+
+  <!--
+    先校验地图、再加载目的地。required="true" 让校验不过时整个 launch 立刻停下，
+    而不是留下一串因为没有 /map 而反复报错的节点。
+  -->
+  <node pkg="ai_robot_nav" type="map_manager_node" name="map_manager"
+        output="screen" required="true">
+    <param name="map_file" value="$(arg map_file)"/>
+    <param name="destinations_file" value="$(arg destinations_file)"/>
+  </node>
+
+  <node pkg="map_server" type="map_server" name="map_server"
+        args="$(arg map_file)" output="screen"/>
+
+  <node pkg="amcl" type="amcl" name="amcl" output="screen">
+    <!-- amcl.yaml 不带顶层 amcl: 键，正是为了在这里按私有命名空间加载。 -->
+    <rosparam file="$(find ai_robot_nav)/config/amcl.yaml" command="load"/>
+    <param name="initial_pose_x" value="$(arg initial_pose_x)"/>
+    <param name="initial_pose_y" value="$(arg initial_pose_y)"/>
+    <param name="initial_pose_a" value="$(arg initial_pose_a)"/>
+  </node>
+
+  <node pkg="move_base" type="move_base" name="move_base"
+        respawn="false" output="screen">
+    <!--
+      costmap_common 要往两个代价地图各加载一次：它只含公共项（足迹、观测源），
+      没有顶层命名空间，因此必须显式指定 ns。另外两个文件自带
+      local_costmap: / global_costmap: 顶层键，直接加载即可。
+    -->
+    <rosparam file="$(find ai_robot_nav)/config/costmap_common.yaml"
+              command="load" ns="global_costmap"/>
+    <rosparam file="$(find ai_robot_nav)/config/costmap_common.yaml"
+              command="load" ns="local_costmap"/>
+    <rosparam file="$(find ai_robot_nav)/config/costmap_global.yaml" command="load"/>
+    <rosparam file="$(find ai_robot_nav)/config/costmap_local.yaml" command="load"/>
+    <rosparam file="$(find ai_robot_nav)/config/move_base.yaml" command="load"/>
+
+    <!-- 规划器选型与依据见 config/move_base.yaml 顶部的注释。 -->
+    <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
+    <param name="base_local_planner" value="dwa_local_planner/DWAPlannerROS"/>
+
+    <!-- 关键：不发 /cmd_vel，交给 nav_mux 汇流后过 safety_node。 -->
+    <remap from="cmd_vel" to="/nav_cmd_vel"/>
+  </node>
+
+  <!--
+    nav_mux 不在这里启动，它属于 ai_nav.launch（导航层本身）。
+    这样安排是为了让两种运行模式共用同一条指令链路：不启动本 launch 时，
+    /move_base/status 一直没有消息，nav_mux 判定无目标点，直接透传漫游指令，
+    纯反应式模式的行为与引入 move_base 之前完全一致。
+    idle_behavior 同理由 ai_nav.launch 转达。
+  -->
+</launch>

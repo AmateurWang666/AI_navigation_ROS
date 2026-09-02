@@ -1,0 +1,132 @@
+# move_base 主控与规划器选型。
+#
+# ============================ 规划器选型依据 ============================
+#
+# 全局规划器: global_planner/GlobalPlanner，启用 A*
+#
+#   ROS 1 导航栈里有两个全局规划器实现，都在 ros-planning/navigation 仓库内：
+#     navfn          2008 年的原版，Dijkstra，参数几乎不可调
+#     global_planner 后来重写的版本，可选 Dijkstra 或 A*，可选路径提取方式
+#   选后者。它是同一份仓库里更现代的实现，且把两个关键行为暴露成了参数
+#   （见下面的 use_dijkstra 与 use_grid_path），而 navfn 把它们写死了。
+#
+#   为什么不用 Hybrid A* / SBPL 这类栅格-状态混合规划器：那类算法解决的是
+#   「非完整约束 + 最小转弯半径」，典型对象是阿克曼转向的车。tjark_agv 是
+#   差速底盘，可以原地旋转，不存在最小转弯半径，用它们只增加计算量和调参
+#   负担，换不来更短的路径。
+#
+#   为什么不用 TEB：teb_local_planner 不在 navigation 仓库里，是独立包且依赖
+#   g2o 图优化库，本机 Ubuntu 24.04 上要连 g2o 一起从源码编译，代价不小。
+#   DWA 对本车这种低速室内差速小车已经够用。将来若要更平滑的绕障，
+#   TEB 是明确的下一步升级方向。
+#
+# 局部规划器: dwa_local_planner/DWAPlannerROS
+#
+#   同样有两个候选：base_local_planner（轨迹展开，更老）与 dwa_local_planner
+#   （动态窗口法）。DWA 在速度空间而不是位置空间采样，对差速底盘的加速度
+#   约束建模更直接，低速下轨迹质量明显更好，是当前 ROS 1 的实际默认选择。
+#
+# =======================================================================
+
+# 【实车】以下频率在 WSL + Gazebo 上是保守值。实车算力更充裕时可适当提高，
+# 但 controller_frequency 必须 <= local_costmap 的 update_frequency，
+# 否则局部规划器会反复用同一份尚未更新的代价地图算轨迹，白白浪费算力。
+controller_frequency: 5.0
+planner_frequency: 0.5
+
+# 规划失败后的容忍时间。planner_patience 内算不出全局路径就触发恢复行为；
+# controller_patience 内局部规划器给不出有效速度同理。
+planner_patience: 5.0
+controller_patience: 15.0
+max_planning_retries: 3
+
+# 恢复行为：代价地图清理 + 原地旋转。本车雷达后向是盲区，因此恢复动作里
+# 不能有倒车，只保留原地旋转——旋转能让雷达扫到原本看不见的方向，
+# 这恰好是本车最需要的补救手段。
+recovery_behavior_enabled: true
+clearing_rotation_allowed: true
+conservative_reset_dist: 3.0
+
+# 振荡判定：机器人在 oscillation_timeout 秒内位移不足 oscillation_distance
+# 就视为卡住并触发恢复。本车巡航速度只有 0.15-0.20 m/s，阈值必须放宽，
+# 否则正常的慢速绕障会被误判成振荡。
+oscillation_timeout: 10.0
+oscillation_distance: 0.2
+
+shutdown_costmaps: false
+
+# ------------------------------------------------------------ 全局规划器
+GlobalPlanner:
+  allow_unknown: false        # 不允许穿越未知区域：用户地图之外没有障碍信息，
+                              # 放开会让机器人规划出穿过未探索空间的路径。
+  use_dijkstra: false         # false = A*。有目标点作为启发，展开的节点数远少于
+                              # Dijkstra，室内地图上规划耗时通常低一个量级。
+                              # 若发现路径明显绕远，改回 true 用 Dijkstra 求全局最优。
+  use_quadratic: true         # 用二次近似算势场，比线性更贴近真实距离，路径更平滑
+  use_grid_path: false        # false = 梯度下降提取路径。沿势场梯度走出来的路径
+                              # 不受栅格八方向限制，天然接近 any-angle（Theta* 追求
+                              # 的效果），省掉了后处理去锯齿这一步。
+                              # true 则严格沿栅格走，会有明显的 45° 阶梯状锯齿。
+  old_navfn_behavior: false
+  visualize_potential: false
+
+  # 路径点间距，供局部规划器跟踪。取 0 表示按代价地图分辨率自动决定。
+  publish_potential: false
+  cost_factor: 0.55
+  neutral_cost: 66
+  lethal_cost: 253
+
+# ------------------------------------------------------------ 局部规划器
+DWAPlannerROS:
+  # ---- 速度限制（与 nav_params.yaml 的 max_linear / max_angular 保持一致）----
+  # 【实车】全部需要重标定。
+  max_vel_trans: 0.20
+  min_vel_trans: 0.05     # 平移速度下界，太小会让 DWA 选出几乎不动的轨迹而卡住
+  max_vel_x: 0.20
+  min_vel_x: 0.0          # 禁止倒车：本车雷达只有前向 180° 视场，车后是盲区，
+                          # 倒车等于闭眼后退。脱困一律用原地旋转。
+  max_vel_y: 0.0          # 差速底盘没有侧向自由度
+  min_vel_y: 0.0
+
+  max_vel_theta: 1.2
+  min_vel_theta: 0.4      # 原地旋转的最小角速度，低于此值转不动（静摩擦）
+
+  acc_lim_x: 1.0
+  acc_lim_y: 0.0
+  acc_lim_theta: 2.0
+  acc_lim_trans: 1.0
+
+  # ---- 到点判定 ----
+  # 0.20 m 与本车尺寸（半径 0.25 m）相称。收得太紧会让机器人在目标点附近
+  # 反复微调却始终判不到位。
+  xy_goal_tolerance: 0.20
+  yaw_goal_tolerance: 0.30
+  latch_xy_goal_tolerance: true   # 一旦进入位置容差就不再为了角度而平移，
+                                  # 避免「转朝向时又蹭出容差、于是重新逼近」的循环
+
+  # ---- 前向仿真 ----
+  sim_time: 2.0           # 每条候选轨迹向前推演的时长。低速车用 2 s 约合 0.4 m，
+                          # 与局部代价地图 4 m 窗口匹配。太长会让轨迹在窄处全被否掉。
+  sim_granularity: 0.025
+  angular_sim_granularity: 0.1
+  vx_samples: 10
+  vy_samples: 1           # 无侧向自由度，采 1 个即可
+  vth_samples: 20         # 角速度多采样：本车主要靠转向绕障
+
+  # ---- 轨迹打分 ----
+  # 三项权重的相对大小决定行为倾向：
+  #   path_distance_bias 高 -> 紧贴全局路径走
+  #   goal_distance_bias 高 -> 更愿意抄近道奔目标
+  #   occdist_scale      高 -> 更远离障碍，但过高会在走廊里畏缩不前
+  path_distance_bias: 32.0
+  goal_distance_bias: 20.0
+  occdist_scale: 0.02
+  forward_point_distance: 0.325
+  stop_time_buffer: 0.2
+  scaling_speed: 0.25
+  max_scaling_factor: 0.2
+
+  # ---- 振荡抑制 ----
+  oscillation_reset_dist: 0.05
+
+  holonomic_robot: false

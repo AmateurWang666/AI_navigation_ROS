@@ -1,12 +1,15 @@
 <!--
-  一键仿真：cafe 场景 + tjark_agv + AI 导航。日常入口是 scripts/sim.sh。
+  一键仿真：cafe 场景 + tjark_agv + 导航。日常入口是 scripts/sim.sh。
 
-    roslaunch ai_robot_nav sim.launch                    # 无 GUI
-    roslaunch ai_robot_nav sim.launch gui:=true          # 带 Gazebo 窗口
-    roslaunch ai_robot_nav sim.launch use_image:=false   # 纯激光，不调用 Ollama
+    roslaunch ai_robot_nav sim.launch                     # 目标点导航 + 反应式漫游
+    roslaunch ai_robot_nav sim.launch gui:=true           # 带 Gazebo 窗口
+    roslaunch ai_robot_nav sim.launch use_image:=false    # 纯激光，不调用 Ollama
+    roslaunch ai_robot_nav sim.launch navigation:=false   # 只跑反应式漫游，不加载地图
+    roslaunch ai_robot_nav sim.launch map_file:=/路径/我的地图.yaml
 
-  仿真环境只有这一个（cafe），不再提供空场景等其它选择：环境固定下来，
-  两次运行之间的差异就只来自代码本身。
+  仿真世界与地图是两件事，都可以换：
+    world_name 决定 Gazebo 里长什么样，map_file 决定导航依据的栅格地图。
+    两者必须对应同一个环境，否则定位会一直发散。换环境的完整步骤见 docs/mapping.md。
 -->
 <launch>
   <arg name="gui" default="false"/>
@@ -14,15 +17,46 @@
   <arg name="use_image" default="true"/>
   <arg name="params_file" default="$(find ai_robot_nav)/config/nav_params.yaml"/>
 
+  <!-- 仿真世界。换场景时与 map_file、出生点一起改。 -->
+  <arg name="world_name" default="$(find tjark_agv)/worlds/cafe.world"/>
+  <arg name="spawn_x" default="1.40"/>
+  <arg name="spawn_y" default="3.125"/>
+  <arg name="spawn_yaw" default="0.0"/>
+
+  <!-- ============================ 导航 ============================ -->
+  <!-- false 则退回引入 move_base 之前的纯反应式漫游，不加载地图、不做定位。 -->
+  <arg name="navigation" default="true"/>
+  <arg name="map_file" default="$(find ai_robot_nav)/maps/cafe.yaml"/>
+  <arg name="destinations_file" default=""/>
+  <arg name="idle_behavior" default="explore"/>
+
   <include file="$(find tjark_agv)/launch/cafe_world.launch">
     <arg name="gui" value="$(arg gui)"/>
     <arg name="headless" value="$(arg headless)"/>
     <arg name="use_sim_time" value="true"/>
+    <arg name="world_name" value="$(arg world_name)"/>
+    <arg name="spawn_x" value="$(arg spawn_x)"/>
+    <arg name="spawn_y" value="$(arg spawn_y)"/>
+    <arg name="spawn_yaw" value="$(arg spawn_yaw)"/>
   </include>
 
   <include file="$(find ai_robot_nav)/launch/ai_nav.launch">
     <arg name="use_sim_time" value="true"/>
     <arg name="use_image" value="$(arg use_image)"/>
     <arg name="params_file" value="$(arg params_file)"/>
+    <arg name="idle_behavior" value="$(arg idle_behavior)"/>
+  </include>
+
+  <!--
+    AMCL 的初始位姿直接取仿真出生点。仿真里这两者本就该一致，分开写只会
+    在改出生点时忘掉另一处，然后表现为「一启动就朝墙走」。
+  -->
+  <include file="$(find ai_robot_nav)/launch/navigation.launch" if="$(arg navigation)">
+    <arg name="map_file" value="$(arg map_file)"/>
+    <arg name="destinations_file" value="$(arg destinations_file)"/>
+    <arg name="params_file" value="$(arg params_file)"/>
+    <arg name="initial_pose_x" value="$(arg spawn_x)"/>
+    <arg name="initial_pose_y" value="$(arg spawn_y)"/>
+    <arg name="initial_pose_a" value="$(arg spawn_yaw)"/>
   </include>
 </launch>

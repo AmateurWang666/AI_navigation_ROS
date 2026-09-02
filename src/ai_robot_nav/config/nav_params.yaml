@@ -9,7 +9,10 @@
 ai_nav_node:
   scan_topic: "/scan"
   image_topic: "/my_camera/color/image_raw"
-  cmd_topic: "/ai_cmd_vel"
+  # 反应式漫游的输出。它不再直接进 safety_node，而是先到 nav_mux 与 move_base
+  # 的目标点导航指令做仲裁——有目标点时漫游必须让出控制权，否则两路指令会在
+  # 同一个话题上互相覆盖，机器人表现为方向来回跳变。
+  cmd_topic: "/explore_cmd_vel"
 
   # ---- Ollama 视觉层（可选，未启动时自动降级为纯激光）----
   ollama_url: "http://localhost:11434/api/generate"
@@ -61,6 +64,25 @@ ai_nav_node:
   escape_commit_time: 4.0
   escape_reverse_time: 9.0
   turn_latch_timeout: 3.0        # 停止转向后方向锁存的保留时长
+
+# 指令仲裁：在 move_base 的目标点导航与反应式漫游之间选一路输出给安全层。
+# 它是 /ai_cmd_vel 的唯一发布者，而 safety_node 仍是 /cmd_vel 的唯一发布者，
+# 因此目标点导航同样受激光急停约束（详见 ai_robot_nav/command_mux.py）。
+nav_mux:
+  goal_cmd_topic: "/nav_cmd_vel"          # move_base 的输出（已由 launch 重映射）
+  explore_cmd_topic: "/explore_cmd_vel"   # ai_nav_node 的输出
+  output_topic: "/ai_cmd_vel"             # 汇流后送往 safety_node
+  move_base_status_topic: "/move_base/status"
+  publish_rate: 20.0                      # 与 safety_node 的控制频率对齐
+  # 指令超时。超时后输出零速而不是沿用上一条：旧指令是针对旧位置算出来的，
+  # 继续执行等于闭着眼睛走。goal 侧取值更紧，因为 move_base 正常时稳定发布，
+  # 一旦断流通常意味着它在规划或执行恢复行为，此时更不该盲目前进。
+  goal_cmd_timeout: 0.5
+  explore_cmd_timeout: 0.7
+  # 无目标点时的行为：explore 漫游 / stop 停车。由 launch 的 idle_behavior 覆盖。
+  idle_behavior: "explore"
+  max_linear: 0.20                        # 与 ai_nav_node、safety_node 保持一致
+  max_angular: 1.2
 
 safety_node:
   scan_topic: "/scan"

@@ -1,9 +1,21 @@
 <!--
-  导航层：ai_nav_node（激光决策 + 可选视觉收敛）与 safety_node（急停/限速）。
+  导航层：反应式漫游（ai_nav_node）、指令仲裁（nav_mux）与安全闸（safety_node）。
 
   这一层不含任何仿真或硬件相关内容，仿真与实车完全共用；平台差异只体现在
   由谁提供 /scan、/my_camera/color/image_raw、/cmd_vel 这几个话题。
   一般不直接启动它，而是走 sim.launch 或 real.launch。
+
+  指令链路：
+
+    ai_nav_node ──► /explore_cmd_vel ─┐
+                                       ├─► nav_mux ──► /ai_cmd_vel ──► safety_node ──► /cmd_vel
+    move_base   ──► /nav_cmd_vel ─────┘
+    （由 navigation.launch 提供，可缺席）
+
+  nav_mux 常驻本层而不是跟着 navigation.launch 走，是为了让「有地图导航」和
+  「纯反应式漫游」共用同一条链路：不启动 navigation.launch 时，/move_base/status
+  始终没有消息，nav_mux 判定无目标点并直接透传漫游指令，行为与引入 move_base
+  之前完全一致。safety_node 在任何模式下都是 /cmd_vel 的唯一发布者。
 -->
 <launch>
   <arg name="params_file" default="$(find ai_robot_nav)/config/nav_params.yaml"/>
@@ -11,6 +23,13 @@
   <arg name="ollama_model" default="llava:7b"/>
   <arg name="use_image" default="true"/>
   <arg name="use_sim_time" default="false"/>
+
+  <!--
+    没有目标点时做什么：
+      explore  跑反应式漫游（保留本项目原有能力，默认）
+      stop     原地不动，只在收到目标点时才运动（实车调试通常要这个）
+  -->
+  <arg name="idle_behavior" default="explore"/>
 
   <param name="/use_sim_time" value="$(arg use_sim_time)"/>
 
@@ -20,6 +39,10 @@
     <param name="ollama_url" value="$(arg ollama_url)"/>
     <param name="ollama_model" value="$(arg ollama_model)"/>
     <param name="use_image" value="$(arg use_image)"/>
+  </node>
+
+  <node pkg="ai_robot_nav" type="nav_mux_node" name="nav_mux" output="screen">
+    <param name="idle_behavior" value="$(arg idle_behavior)"/>
   </node>
 
   <node pkg="ai_robot_nav" type="safety_node" name="safety_node" output="screen"/>

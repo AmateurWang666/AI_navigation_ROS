@@ -1,0 +1,42 @@
+# 全局与局部代价地图的公共部分（两者都会加载本文件）。
+#
+# 车辆几何来自 urdf/tjark_agv.urdf 与 docs/platform.md：
+#   驱动轮   y = ±0.192205        -> 轮距 0.3844 m
+#   万向轮   x = ±0.138, y = ±0.094
+#   激光雷达 位于 base_link 前方 0.166 m，视场仅前向 180°，量程 0.12-20 m
+#
+# 【实车】换车或改装后必须重新核对 robot_radius 与 inflation_radius。
+
+# 用圆形足迹而不是多边形 footprint：差速底盘会原地旋转，圆形足迹是旋转不变的，
+# 代价地图不必随朝向重算，既省算力又不会出现「转到某个角度突然判定为碰撞」。
+# 半径按最外缘取：轮距一半 0.192 + 轮宽余量，再对 x 向 ±0.138 的万向轮留出裕度。
+robot_radius: 0.25
+
+# 膨胀半径决定路径离墙多远。取 robot_radius 的约 1.8 倍：太小会贴着墙规划，
+# 差速车转弯时容易蹭到；太大则会把本来能过的窄门判成不可通行。
+# cost_scaling_factor 越大，代价随距离衰减越快，路径越贴近障碍。
+inflation_radius: 0.45
+cost_scaling_factor: 5.0
+
+# 观测源。本车只有一个 2D 激光可用于避障：深度相机的点云 /my_camera/depth/points
+# 有效距离只有 0.5-3.0 m 且朝向固定，加进来收益有限、开销明显，故不启用。
+observation_sources: laser_scan_sensor
+
+laser_scan_sensor:
+  sensor_frame: laser
+  data_type: LaserScan
+  topic: /scan
+  marking: true      # 用测到的点标记障碍
+  clearing: true     # 沿射线清除旧障碍
+  # 量程虽然到 20 m，但远距离读数对局部避障没有意义，反而会把远处的墙
+  # 也塞进滚动窗口、拖慢更新。截到 4 m 覆盖局部代价地图足够。
+  obstacle_range: 4.0
+  raytrace_range: 5.0
+  # 低于雷达最小量程的点是丢点不是障碍，抬高一点下界避免把它们当成贴脸障碍。
+  min_obstacle_height: -0.1
+  max_obstacle_height: 1.0
+
+# 注意：本车雷达只有前向 180° 视场，车后完全没有采样点。这意味着代价地图
+# 无法清除车后的历史障碍——机器人转身之前，身后的栅格会一直保留旧观测。
+# 因此局部规划器禁止倒车（见 move_base.yaml 的 min_vel_x: 0.0），
+# 只用原地旋转脱困。实车若加装后向传感器，可在此追加观测源并放开倒车。

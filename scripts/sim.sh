@@ -5,6 +5,8 @@
 #   bash scripts/sim.sh --lidar      # 不调用 Ollama，纯激光（更少日志）
 #   bash scripts/sim.sh --gui        # 带 Gazebo 窗口（WSL 较慢）
 #   bash scripts/sim.sh --verbose    # 显示 Gazebo 相机 DEBUG（默认已静音）
+#   bash scripts/sim.sh --map 图.yaml # 换一张地图（默认 maps/cafe.yaml）
+#   bash scripts/sim.sh --no-nav     # 只跑反应式漫游，不起 move_base
 #
 #   bash scripts/sim.sh gazebo       # 只起仿真（终端 1）
 #   bash scripts/sim.sh nav          # 只起导航（终端 2，自动等 /scan）
@@ -19,9 +21,11 @@ USE_IMAGE=true
 HEADLESS=true
 MODE=full
 VERBOSE=false
+MAP_FILE=""
+NAVIGATION=auto      # auto = 装了导航栈就用，没装就退回反应式漫游
 
 usage() {
-    sed -n '2,13p' "$0"
+    sed -n '2,15p' "$0"
     exit "${1:-0}"
 }
 
@@ -30,11 +34,38 @@ while [ $# -gt 0 ]; do
         --lidar|--no-vision) USE_IMAGE=false ;;
         --gui)               HEADLESS=false ;;
         --verbose)           VERBOSE=true ;;
+        --no-nav)            NAVIGATION=false ;;
+        --map)
+            shift
+            [ $# -gt 0 ] || { echo "--map 需要一个地图 yaml 路径"; exit 1; }
+            MAP_FILE="$1"
+            ;;
         gazebo|nav|stop|help|-h) MODE="$1" ;;
         *) echo "unknown option: $1"; usage 1 ;;
     esac
     shift
 done
+
+# 导航栈是源码编译的独立 overlay，未安装时 sim.launch 会因为找不到 move_base
+# 而整体启动失败。与其抛一个 roslaunch 的 ResourceNotFound 让人去猜，
+# 不如在这里探测一次并退回到反应式漫游——那是本项目原本就能跑的模式。
+resolve_navigation() {
+    if [ "$NAVIGATION" != auto ]; then
+        return
+    fi
+    if rospack find move_base >/dev/null 2>&1; then
+        NAVIGATION=true
+        return
+    fi
+    NAVIGATION=false
+    echo "=============================================="
+    echo "  未检测到导航栈，本次只跑反应式漫游。"
+    echo "  目标点导航需要先安装（约 10-25 分钟）："
+    echo "      bash scripts/install_nav_stack.sh"
+    echo "  说明见 docs/mapping.md"
+    echo "=============================================="
+    echo
+}
 
 setup_gui_env() {
     if [ "$HEADLESS" = true ]; then
@@ -64,6 +95,11 @@ print_banner() {
     echo "  另开终端看位移："
     echo "    source ~/ros_ws/devel/setup.bash"
     echo "    rostopic echo /odom/pose/pose/position/x"
+    if [ "$NAVIGATION" = true ]; then
+        echo "  导航到指定目的地（另开终端）："
+        echo "    rosrun ai_robot_nav send_goal --list"
+        echo "    rosrun ai_robot_nav send_goal hall"
+    fi
     echo "  停止：Ctrl+C  或  bash scripts/sim.sh stop"
     echo "=============================================="
     echo
@@ -122,10 +158,16 @@ case "$MODE" in
         ;;
     full)
         stop_sim
+        resolve_navigation
         print_banner
-        exec roslaunch ai_robot_nav sim.launch \
+        set -- \
             headless:="$HEADLESS" \
             gui:="$([ "$HEADLESS" = true ] && echo false || echo true)" \
-            use_image:="$USE_IMAGE"
+            use_image:="$USE_IMAGE" \
+            navigation:="$NAVIGATION"
+        if [ -n "$MAP_FILE" ]; then
+            set -- "$@" map_file:="$MAP_FILE"
+        fi
+        exec roslaunch ai_robot_nav sim.launch "$@"
         ;;
 esac

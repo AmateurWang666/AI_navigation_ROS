@@ -1,0 +1,41 @@
+# 局部代价地图：跟着车走的一小块滚动窗口，供局部规划器做实时避障。
+local_costmap:
+  # 局部代价地图挂在 odom 而不是 map 下。odom 是连续的，而 amcl 会在重定位时
+  # 让 map 坐标突跳；局部窗口若挂在 map 上，一次突跳就会让刚测到的障碍整体
+  # 平移，机器人会对着不存在的东西急打方向。
+  global_frame: odom
+  robot_base_frame: base_link
+
+  # 局部窗口要跟上实时避障，频率必须高于全局。5 Hz 与本项目 safety_node 的
+  # 20 Hz、ai_nav_node 的 10 Hz 处在同一量级，WSL 上也扛得住。
+  update_frequency: 5.0
+  publish_frequency: 2.0
+  transform_tolerance: 0.5
+
+  static_map: false
+  rolling_window: true
+
+  # 4x4 m 的窗口，车在正中。取值要同时大于雷达有效避障距离（4 m）的一半
+  # 和局部规划器的前瞻距离，否则规划器会看到窗口边界外的未知区域而畏缩不前。
+  width: 4.0
+  height: 4.0
+  resolution: 0.05
+
+  plugins:
+    - {name: obstacle_layer,  type: "costmap_2d::ObstacleLayer"}
+    - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
+
+  obstacle_layer:
+    observation_sources: laser_scan_sensor
+    laser_scan_sensor:
+      sensor_frame: laser
+      data_type: LaserScan
+      topic: /scan
+      marking: true
+      clearing: true
+      obstacle_range: 4.0
+      raytrace_range: 5.0
+
+  inflation_layer:
+    inflation_radius: 0.45
+    cost_scaling_factor: 5.0

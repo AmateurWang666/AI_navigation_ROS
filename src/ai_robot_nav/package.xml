@@ -13,12 +13,36 @@
   <depend>geometry_msgs</depend>
   <depend>cv_bridge</depend>
   <depend>std_msgs</depend>
+  <!-- std_srvs/Trigger：mapper_node 的 ~save_map 存盘服务 -->
+  <depend>std_srvs</depend>
+
+  <!-- 目标点导航：actionlib 下发目标并回传结果，nav_msgs/tf2 用于建图与位姿 -->
+  <depend>nav_msgs</depend>
+  <depend>actionlib</depend>
+  <depend>actionlib_msgs</depend>
+  <depend>tf2_ros</depend>
+  <!--
+    move_base_msgs 只在 send_goal 的运行期用到。它声明为 exec_depend 而不是
+    depend，是因为本机的 ROS 源不提供该包，需由 install_nav_stack.sh 源码编译；
+    若列为构建依赖，导航栈装好之前连本包都编译不过去，先有鸡还是先有蛋。
+  -->
+  <exec_depend>move_base_msgs</exec_depend>
 
   <exec_depend>roslaunch</exec_depend>
   <exec_depend>python3-requests</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
   <!-- 车辆描述与 cafe 仿真环境，由 sim.launch / real.launch 引用 -->
   <exec_depend>tjark_agv</exec_depend>
+  <!--
+    导航栈。本机 Ubuntu 24.04 上没有 Noetic 官方二进制包，社区 PPA 也不提供
+    这几个包，需由 scripts/install_nav_stack.sh 从源码编译到独立工作空间。
+  -->
+  <exec_depend>map_server</exec_depend>
+  <exec_depend>amcl</exec_depend>
+  <exec_depend>move_base</exec_depend>
+  <exec_depend>global_planner</exec_depend>
+  <exec_depend>dwa_local_planner</exec_depend>
 
   <export>
   </export>

@@ -29,3 +29,11 @@ CMakeLists.txt text eol=lf
 *.dae binary
 *.jpg binary
 *.png binary
+
+# 栅格地图。必须显式声明，不能依赖 git 的二进制自动识别：
+# 那是靠内容里有没有 NUL 字节来判断的，而 PGM 的 NUL 恰好来自「占据」栅格
+# （占据=0x00）。一张没有障碍物的地图就不含 NUL，会被误判成文本，
+# 检出时插入 CR 把图片彻底损坏——而且直到 map_server 读图报错才会发现。
+*.pgm binary
+*.pgm -text
+*.bmp binary

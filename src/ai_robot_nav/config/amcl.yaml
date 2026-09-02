@@ -1,0 +1,79 @@
+# AMCL 自适应蒙特卡洛定位：在用户地图上估计车辆位姿，并发布 map -> odom 修正。
+#
+# 没有它，全局规划只能建立在里程计上，而里程计必然漂移——短距离看不出来，
+# 走上几十米后规划出的路径就会整体偏离真实环境。
+#
+# 本车有一个对定位很不利的特点：**激光只有前向 180° 视场**（见 docs/platform.md）。
+# 360° 雷达在走廊里能同时看到前后两端，位姿约束很强；只有前向视场时，
+# 沿走廊方向的平移分量长期缺少约束，粒子容易在该方向上发散。
+# 下面几处针对性放宽了粒子数与噪声，代价是 CPU 占用略高。
+#
+# 本文件刻意不写顶层 amcl: 键：它由 navigation.launch 在 <node name="amcl"> 内部
+# 加载，走的是节点私有命名空间，参数会落到 /amcl/xxx。若再套一层 amcl:，
+# 就会变成 /amcl/amcl/xxx，AMCL 读不到，然后全部静默使用默认值——不报错，
+# 只是定位莫名其妙地差。
+
+# ---- 坐标系 ----
+odom_frame_id: odom
+base_frame_id: base_link
+global_frame_id: map
+# tf 发布容差。WSL 里 Gazebo 时钟抖动较大，给足余量，否则 move_base 会频繁
+# 报 "Extrapolation Error" 并拒绝规划。
+transform_tolerance: 0.5
+
+# ---- 里程计运动模型 ----
+# diff-corrected 是修正版的差速模型；老的 "diff" 存在已知的噪声建模缺陷，
+# 新项目不应再用。
+odom_model_type: diff-corrected
+
+# 四个 alpha 是运动噪声，值越大越信任激光、越不信任里程计。
+# 【本项目特有】docs/platform.md 记录了一笔技术债：URDF 的轮距 0.3844 m 与
+# diff_drive 插件的 0.34 m 不一致，轮径同样对不上。这意味着里程计**尺度本身
+# 就是偏的**，不只是随机噪声。因此这里取值高于常见的 0.1-0.2，
+# 让滤波器更依赖激光观测。实车标定统一三处取值后，可以调回 0.1 左右。
+odom_alpha1: 0.3    # 旋转带来的旋转噪声
+odom_alpha2: 0.3    # 平移带来的旋转噪声
+odom_alpha3: 0.3    # 平移带来的平移噪声
+odom_alpha4: 0.3    # 旋转带来的平移噪声
+
+# ---- 粒子滤波 ----
+# 上限取到 3000 而非常见的 2000：前向 180° 视场下位姿多解更多，粒子太少时
+# 容易整体收敛到错误的一支上，而且一旦收敛错就很难自行恢复。
+min_particles: 500
+max_particles: 3000
+kld_err: 0.05
+kld_z: 0.99
+
+# 位移/转角超过阈值才更新滤波器。设为 0 会让机器人静止时也不断重采样，
+# 粒子集会因为重采样噪声而慢慢发散。
+update_min_d: 0.2     # m
+update_min_a: 0.5     # rad
+resample_interval: 1
+
+# 定位丢失后的恢复：检测到平均粒子权重骤降时注入随机粒子。
+# 两个值都为 0 表示关闭恢复，机器人一旦定位错就永远错下去。
+recovery_alpha_slow: 0.001
+recovery_alpha_fast: 0.1
+
+# ---- 激光观测模型 ----
+# likelihood_field 比 beam 模型快得多且对局部极小值更鲁棒，是当前的通行选择。
+laser_model_type: likelihood_field
+# 从 360 条射线里等间隔取 60 条参与更新。全部使用几乎不提升精度，
+# 却会让每次更新的开销涨好几倍——WSL 上这点很关键。
+laser_max_beams: 60
+
+laser_z_hit: 0.5
+laser_z_rand: 0.5
+laser_z_short: 0.05
+laser_z_max: 0.05
+laser_sigma_hit: 0.2
+laser_likelihood_max_dist: 2.0
+
+# 量程截断。雷达标称到 20 m，但远距离读数噪声大、且很可能打到地图上
+# 根本没建模的东西（比如 cafe 场景外的空白）。截到 12 m 更稳。
+laser_min_range: 0.12
+laser_max_range: 12.0
+
+# headless 运行，不需要粒子云的可视化刷新（-1 表示关闭）。
+# 需要在 RViz 里看粒子云时，/particlecloud 话题不受此项影响，照常发布。
+gui_publish_rate: -1.0
