@@ -123,6 +123,61 @@ bash scripts/install_nav_stack.sh     # 装导航栈（目标点导航需要）
 
 ---
 
+## 地图与导航安全（必读）
+
+目标点导航能否成功，**不只看 move_base 有没有装好，更取决于地图是否完整**。
+这是本项目最容易踩坑、也最容易被误判为「规划器坏了」的地方。
+
+### 核心规则：`allow_unknown` 默认必须是 `false`
+
+全局规划器有一个参数 `GlobalPlanner/allow_unknown`：
+
+| 取值 | 行为 | 适用场景 |
+|------|------|----------|
+| **`false`（默认）** | 只在「已知空闲」栅格上规划；**未知区域视为不可通行** | 完整地图、实车、任何需要安全保证的场景 |
+| `true` | 允许路径穿越未知栅格 | 仅作**临时权宜**，例如地图还没建完、又要先跑通 demo |
+
+`allow_unknown=true` 的含义是：机器人可能被规划进**从未观测过的区域**——那里有没有墙、台阶、玻璃，地图里完全没有信息。局部代价地图只能看见当前激光扫到的范围，**挡不住地图标注错误带来的风险**。
+
+因此：
+
+1. **不要把 `allow_unknown` 永久写进 `move_base.yaml`。** 默认值已设为 `false`。
+2. **正确做法是补建地图**：让起点到目标点之间的走廊在地图上标记为「已知空闲」。
+3. **若暂时无法补建**，可以显式临时放宽（启动时传参，而不是改配置文件）：
+
+```bash
+# 临时放宽——有安全风险，仅用于地图覆盖不完整的调试
+bash scripts/sim.sh --allow-unknown
+# 或
+roslaunch ai_robot_nav sim.launch allow_unknown:=true
+```
+
+### 内置 cafe 地图的已知限制
+
+仓库自带的 `maps/cafe.yaml` 是用轻量建图节点生成的演示地图，**覆盖率约 17%**（大量区域仍是未知）。在此地图 + `allow_unknown=false` 下：
+
+- 近处目标点（如 `north`）通常可以抵达
+- 较远目标点（如 `hall`）往往报 `Failed to find a valid plan`——因为路径必须穿过未知区域
+
+这不是 bug，而是安全策略在起作用。启动时 **`map_manager` 会打印连通性警告**，列出哪些命名目的地在当前策略下不可达，并给出补建地图的步骤。
+
+**推荐流程（换环境或发现规划失败时）：**
+
+```bash
+# 1. 重新建图，直到覆盖率不再增长
+roslaunch ai_robot_nav mapping.launch
+
+# 2. 存盘
+rosservice call /mapper/save_map
+
+# 3. 用新地图启动（allow_unknown 保持默认 false）
+bash scripts/sim.sh --map /path/to/my_map.yaml
+```
+
+用 gmapping / cartographer 等工具建出的完整地图，通常边界外才有少量未知，`allow_unknown=false` 即可正常工作。
+
+---
+
 ## 快速开始
 
 ### 一条命令跑全程（日常推荐）
@@ -157,7 +212,7 @@ rostopic echo /odom/pose/pose/position
 source /opt/ros/noetic/setup.bash && source ~/ros_ws/devel/setup.bash
 
 rosrun ai_robot_nav send_goal --list      # 看有哪些命名目的地
-rosrun ai_robot_nav send_goal hall        # 按名字去
+rosrun ai_robot_nav send_goal hall        # 按名字去（需地图连通，见上文「地图与导航安全」）
 rosrun ai_robot_nav send_goal 0.5 -3.5    # 按坐标去
 ```
 
@@ -177,6 +232,7 @@ bash scripts/sim.sh --map /路径/到/我的地图.yaml
 ```bash
 bash scripts/sim.sh --lidar     # 纯激光，不调用 Ollama
 bash scripts/sim.sh --gui       # 单终端全流程 + Gazebo 窗口
+bash scripts/sim.sh --allow-unknown  # 临时允许穿越未知区域（见「地图与导航安全」）
 bash scripts/sim.sh gazebo      # 仅仿真（终端 1）
 bash scripts/sim.sh nav         # 仅导航（终端 2，自动等 /scan）
 ```
@@ -290,6 +346,7 @@ ROS_AI_Robot_Workspace/
 | 转很久出不来 | 车头顶住了障碍 | 已内置：4 s 锁死方向、9 s 边退边转 |
 | Gazebo 启动卡住 | 联网找模型 | 已修复：模型内置且关闭在线模型库；请用 `scripts/sim.sh` |
 | 一直停车 | `/scan` 未发布或 AI 超时 | 先启仿真；`rostopic echo /scan` |
+| `send_goal` 报规划失败 | 地图不完整且 `allow_unknown=false` | **先读「地图与导航安全」**；补建地图；临时可用 `--allow-unknown` |
 | Ollama 报错 | 服务未启动 | `bash scripts/sim.sh --lidar` 纯激光模式 |
 
 ---

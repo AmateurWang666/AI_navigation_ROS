@@ -50,6 +50,13 @@
   <arg name="initial_pose_y" default="3.125"/>
   <arg name="initial_pose_a" default="0.0"/>
 
+  <!--
+    allow_unknown: 全局规划器是否允许穿越未知栅格。
+    默认 false（安全）。只有地图覆盖不完整、又暂时无法补建时才显式设为 true。
+    详见 README「地图与导航安全」与 map_manager 启动时的连通性警告。
+  -->
+  <arg name="allow_unknown" default="false"/>
+
   <arg name="params_file" default="$(find ai_robot_nav)/config/nav_params.yaml"/>
 
   <!--
@@ -69,6 +76,9 @@
         output="screen" required="true">
     <param name="map_file" value="$(arg map_file)"/>
     <param name="destinations_file" value="$(arg destinations_file)"/>
+    <param name="allow_unknown" value="$(arg allow_unknown)"/>
+    <param name="initial_pose_x" value="$(arg initial_pose_x)"/>
+    <param name="initial_pose_y" value="$(arg initial_pose_y)"/>
   </node>
 
   <node pkg="map_server" type="map_server" name="map_server"
@@ -100,6 +110,8 @@
     <!-- 规划器选型与依据见 config/move_base.yaml 顶部的注释。 -->
     <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
     <param name="base_local_planner" value="dwa_local_planner/DWAPlannerROS"/>
+    <!-- 覆盖 move_base.yaml 里的默认值；launch 参数是显式开关，便于临时放宽。 -->
+    <param name="GlobalPlanner/allow_unknown" value="$(arg allow_unknown)"/>
 
     <!-- 关键：不发 /cmd_vel，交给 nav_mux 汇流后过 safety_node。 -->
     <remap from="cmd_vel" to="/nav_cmd_vel"/>

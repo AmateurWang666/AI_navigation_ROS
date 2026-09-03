@@ -7,6 +7,7 @@
 #   bash scripts/sim.sh --verbose    # 显示 Gazebo 相机 DEBUG（默认已静音）
 #   bash scripts/sim.sh --map 图.yaml # 换一张地图（默认 maps/cafe.yaml）
 #   bash scripts/sim.sh --no-nav     # 只跑反应式漫游，不起 move_base
+#   bash scripts/sim.sh --allow-unknown  # 临时允许穿越未知区域（有安全风险，见 README）
 #
 #   bash scripts/sim.sh gazebo       # 只起仿真（终端 1）
 #   bash scripts/sim.sh nav          # 只起导航（终端 2，自动等 /scan）
@@ -23,6 +24,7 @@ MODE=full
 VERBOSE=false
 MAP_FILE=""
 NAVIGATION=auto      # auto = 装了导航栈就用，没装就退回反应式漫游
+ALLOW_UNKNOWN=false
 
 usage() {
     sed -n '2,15p' "$0"
@@ -35,6 +37,7 @@ while [ $# -gt 0 ]; do
         --gui)               HEADLESS=false ;;
         --verbose)           VERBOSE=true ;;
         --no-nav)            NAVIGATION=false ;;
+        --allow-unknown)     ALLOW_UNKNOWN=true ;;
         --map)
             shift
             [ $# -gt 0 ] || { echo "--map 需要一个地图 yaml 路径"; exit 1; }
@@ -167,6 +170,9 @@ case "$MODE" in
             navigation:="$NAVIGATION"
         if [ -n "$MAP_FILE" ]; then
             set -- "$@" map_file:="$MAP_FILE"
+        fi
+        if [ "$ALLOW_UNKNOWN" = true ]; then
+            set -- "$@" allow_unknown:=true
         fi
         exec roslaunch ai_robot_nav sim.launch "$@"
         ;;

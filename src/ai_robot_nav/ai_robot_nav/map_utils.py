@@ -49,6 +49,252 @@ class MapInfo(NamedTuple):
     negate: int
 
 
+# map_server / PGM 灰度值约定（与 occupancy_grid.py 一致）
+PGM_FREE = 254
+PGM_OCCUPIED = 0
+PGM_UNKNOWN = 205
+
+FREE = 1
+OCCUPIED = 2
+UNKNOWN = 0
+
+
+class MapCoverage(NamedTuple):
+    """栅格地图的覆盖率统计。"""
+
+    width: int
+    height: int
+    free: int
+    occupied: int
+    unknown: int
+
+    @property
+    def total(self) -> int:
+        return self.free + self.occupied + self.unknown
+
+    @property
+    def known_ratio(self) -> float:
+        return (self.free + self.occupied) / self.total if self.total else 0.0
+
+    @property
+    def unknown_ratio(self) -> float:
+        return self.unknown / self.total if self.total else 0.0
+
+
+class ReachabilityReport(NamedTuple):
+    """从起点出发、在指定 allow_unknown 策略下能到达的目的地。"""
+
+    coverage: MapCoverage
+    spawn_cell: Optional[tuple]
+    unreachable: List[str]       # 在 allow_unknown=False 时走不通的目的地名字
+    unknown_only: List[str]      # 目的地落在未知格上
+    blocked: List[str]           # 目的地落在障碍或地图外
+
+
+def _read_pgm(path: str) -> tuple:
+    """读取 P5 二进制 PGM，返回 (width, height, pixels bytearray)。"""
+    with open(path, 'rb') as handle:
+        blob = handle.read()
+    parts = blob.split(b'\n', 3)
+    if parts[0] != b'P5':
+        raise MapError(f'{path}: 只支持 P5 二进制 PGM，当前为 {parts[0]!r}')
+    width, height = map(int, parts[1].split())
+    pixels = parts[3]
+    if len(pixels) != width * height:
+        raise MapError(
+            f'{path}: 像素数 {len(pixels)} 与尺寸 {width}x{height} 不符')
+    return width, height, pixels
+
+
+def _pgm_value_to_state(value: int) -> int:
+    if value == PGM_OCCUPIED:
+        return OCCUPIED
+    if value == PGM_FREE:
+        return FREE
+    return UNKNOWN
+
+
+def load_map_grid(info: MapInfo) -> tuple:
+    """把地图图片读成按 OccupancyGrid 行序排列的状态网格。
+
+    第 0 行对应 origin 处的 +y 方向（地图底部），与 map_server 一致。
+    返回 (width, height, states)，states[row * width + col] 为 FREE/OCCUPIED/UNKNOWN。
+    """
+    width, height, pixels = _read_pgm(info.image_path)
+    states = [UNKNOWN] * (width * height)
+    for pgm_row in range(height):
+        grid_row = height - 1 - pgm_row
+        base = pgm_row * width
+        target = grid_row * width
+        for col in range(width):
+            states[target + col] = _pgm_value_to_state(pixels[base + col])
+    return width, height, states
+
+
+def analyze_coverage(info: MapInfo) -> MapCoverage:
+    """统计地图中空闲/占据/未知栅格的数量。"""
+    width, height, states = load_map_grid(info)
+    counts = {FREE: 0, OCCUPIED: 0, UNKNOWN: 0}
+    for state in states:
+        counts[state] += 1
+    return MapCoverage(width, height, counts[FREE], counts[OCCUPIED], counts[UNKNOWN])
+
+
+def world_to_cell(info: MapInfo, width: int, height: int, x: float, y: float):
+    """世界坐标 -> 栅格 (col, row)。越界返回 None。"""
+    col = int((x - info.origin[0]) / info.resolution)
+    row = int((y - info.origin[1]) / info.resolution)
+    if not (0 <= col < width and 0 <= row < height):
+        return None
+    return col, row
+
+
+def _cell_state(states, width, col, row) -> int:
+    return states[row * width + col]
+
+
+def _is_traversable(state: int, allow_unknown: bool) -> bool:
+    if state == OCCUPIED:
+        return False
+    if state == FREE:
+        return True
+    return allow_unknown
+
+
+def _bfs_reachable(states, width, height, start, allow_unknown: bool) -> set:
+    """从 start=(col,row) 出发，8 邻域 BFS，返回可达格集合。"""
+    if start is None:
+        return set()
+    col0, row0 = start
+    if not _is_traversable(_cell_state(states, width, col0, row0), allow_unknown):
+        return set()
+
+    seen = {start}
+    frontier = [start]
+    while frontier:
+        next_frontier = []
+        for col, row in frontier:
+            for dc in (-1, 0, 1):
+                for dr in (-1, 0, 1):
+                    if dc == 0 and dr == 0:
+                        continue
+                    nc, nr = col + dc, row + dr
+                    if not (0 <= nc < width and 0 <= nr < height):
+                        continue
+                    if (nc, nr) in seen:
+                        continue
+                    if not _is_traversable(
+                            _cell_state(states, width, nc, nr), allow_unknown):
+                        continue
+                    seen.add((nc, nr))
+                    next_frontier.append((nc, nr))
+        frontier = next_frontier
+    return seen
+
+
+def check_reachability(
+    info: MapInfo,
+    spawn_xy: tuple,
+    destinations: Dict[str, tuple],
+    allow_unknown: bool,
+) -> ReachabilityReport:
+    """检查从起点到各命名目的地的栅格连通性。
+
+    allow_unknown=False 时只在 FREE 格上 BFS——与 GlobalPlanner allow_unknown=false
+    的行为一致：路径不能穿越未知区域。若某目的地不可达，全局规划几乎必然失败。
+    """
+    width, height, states = load_map_grid(info)
+    coverage = analyze_coverage(info)
+    spawn_cell = world_to_cell(info, width, height, spawn_xy[0], spawn_xy[1])
+
+    reachable = _bfs_reachable(states, width, height, spawn_cell, allow_unknown)
+
+    unreachable, unknown_only, blocked = [], [], []
+    for name, dest in destinations.items():
+        cell = world_to_cell(info, width, height, dest[0], dest[1])
+        if cell is None:
+            blocked.append(name)
+            continue
+        state = _cell_state(states, width, *cell)
+        if state == OCCUPIED:
+            blocked.append(name)
+        elif state == UNKNOWN:
+            unknown_only.append(name)
+            if cell not in reachable:
+                unreachable.append(name)
+        elif cell not in reachable:
+            unreachable.append(name)
+
+    return ReachabilityReport(coverage, spawn_cell, unreachable, unknown_only, blocked)
+
+
+# 未知区域超过此比例时，在 allow_unknown=false 下几乎必然规划失败。
+SPARSE_MAP_UNKNOWN_RATIO = 0.40
+
+
+def format_navigation_readiness(
+    info: MapInfo,
+    spawn_xy: tuple,
+    destinations: Dict[str, tuple],
+    allow_unknown: bool,
+) -> str:
+    """生成启动时的地图/nav 就绪报告，含覆盖率与连通性警告。"""
+    if not destinations:
+        coverage = analyze_coverage(info)
+        lines = [
+            f'地图覆盖率: 已知 {coverage.known_ratio * 100:.1f}% '
+            f'(空闲 {coverage.free / coverage.total * 100:.1f}%, '
+            f'占据 {coverage.occupied / coverage.total * 100:.1f}%, '
+            f'未知 {coverage.unknown_ratio * 100:.1f}%)',
+        ]
+        if coverage.unknown_ratio > SPARSE_MAP_UNKNOWN_RATIO and not allow_unknown:
+            lines.append(
+                '警告: 未知区域占比高且 allow_unknown=false。'
+                '若规划失败，请先补建地图或显式设置 allow_unknown:=true。')
+        return '\n'.join(lines)
+
+    report = check_reachability(info, spawn_xy, destinations, allow_unknown)
+    cov = report.coverage
+    lines = [
+        f'地图覆盖率: 已知 {cov.known_ratio * 100:.1f}% '
+        f'(空闲 {cov.free / cov.total * 100:.1f}%, '
+        f'占据 {cov.occupied / cov.total * 100:.1f}%, '
+        f'未知 {cov.unknown_ratio * 100:.1f}%)',
+        f'allow_unknown={allow_unknown}, '
+        f'起点 ({spawn_xy[0]:.2f}, {spawn_xy[1]:.2f}) '
+        f'-> 栅格 {report.spawn_cell}',
+    ]
+
+    if report.unreachable:
+        lines.append('')
+        lines.append('!!! 以下命名目的地在 allow_unknown=false 时不可达 !!!')
+        lines.append('    （全局规划器不会穿越未知区域，send_goal 将报 Failed to find a valid plan）')
+        for name in report.unreachable:
+            dest = destinations[name]
+            lines.append(f'    - {name}: ({dest[0]:.2f}, {dest[1]:.2f})')
+        lines.append('')
+        lines.append('推荐做法（按优先级）:')
+        lines.append('  1. 补建地图，让起点到目标点之间的走廊变为「已知空闲」——这是正确做法')
+        lines.append('     roslaunch ai_robot_nav mapping.launch')
+        lines.append('     rosservice call /mapper/save_map')
+        lines.append('  2. 若暂时无法补建，可显式放宽（有安全风险，机器人可能进入未探索区域）:')
+        lines.append('     roslaunch ai_robot_nav sim.launch allow_unknown:=true')
+        lines.append('')
+        lines.append('!!! 请勿把 allow_unknown 永久设为 true —— 见 README「地图与导航安全」 !!!')
+
+    if report.blocked:
+        lines.append(f'警告: 以下目的地落在障碍或地图外: {", ".join(report.blocked)}')
+
+    if (cov.unknown_ratio > SPARSE_MAP_UNKNOWN_RATIO
+            and not allow_unknown
+            and not report.unreachable):
+        lines.append(
+            '提示: 未知区域占比高，部分坐标目标点可能规划失败。'
+            '建议补建地图后再导航。')
+
+    return '\n'.join(lines)
+
+
 def _require_number(data: Dict[str, Any], key: str, yaml_path: str) -> float:
     value = data[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)):

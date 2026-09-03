@@ -22,8 +22,10 @@ import yaml
 
 from ai_robot_nav.goals import GoalError, format_destinations, parse_destinations
 from ai_robot_nav.lifecycle import install_shutdown_signals
-from ai_robot_nav.map_utils import MapError, describe_map, load_map_info
-from ai_robot_nav.ros_params import param
+from ai_robot_nav.map_utils import (
+    MapError, describe_map, format_navigation_readiness, load_map_info,
+)
+from ai_robot_nav.ros_params import param, param_bool, param_float
 
 # 目的地表的默认位置：把地图 yaml 的扩展名换成 .destinations.yaml。
 DESTINATIONS_SUFFIX = '.destinations.yaml'
@@ -74,6 +76,12 @@ def main():
     rospy.loginfo(describe_map(info))
     rospy.loginfo(f'地图图片: {info.image_path}')
 
+    allow_unknown = param_bool('allow_unknown', False)
+    spawn_xy = (
+        param_float('initial_pose_x', 0.0),
+        param_float('initial_pose_y', 0.0),
+    )
+
     destinations_file = param('destinations_file', '') or \
         default_destinations_path(info.yaml_path)
 
@@ -90,6 +98,16 @@ def main():
         rospy.set_param('/destinations',
                         {name: [d.x, d.y, d.yaw] for name, d in table.items()})
         rospy.loginfo(f'可用目的地:\n{format_destinations(table)}')
+
+    dest_tuples = {name: (d.x, d.y) for name, d in table.items()} if table else {}
+    readiness = format_navigation_readiness(
+        info, spawn_xy, dest_tuples, allow_unknown)
+    if readiness:
+        if '!!!' in readiness:
+            rospy.logwarn(readiness)
+            print(f'\n[地图/nav 警告]\n{readiness}\n', file=sys.stderr)
+        else:
+            rospy.loginfo(readiness)
 
     # 校验与加载都是一次性的，但本节点标了 required="true"，退出会让 roslaunch
     # 关停整个链路。因此这里必须保持存活，靠 spin 挂住。

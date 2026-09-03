@@ -281,7 +281,46 @@ TEB 是明确的下一步升级方向。
 
 ---
 
-## 七、常见问题
+## 七、地图覆盖率与 allow_unknown（重要）
+
+`GlobalPlanner/allow_unknown` 决定全局规划器能否在**未知栅格**上寻路。
+
+| 取值 | 含义 |
+|------|------|
+| **`false`（默认）** | 只在已知空闲格上规划；未知 = 不可通行。安全，要求地图完整。 |
+| `true` | 允许穿越未知区域。仅作临时调试，有安全风险。 |
+
+### 为什么默认必须是 false
+
+未知区域代表「从未观测过」。`allow_unknown=true` 时，规划器可能把机器人送进
+地图里完全没有障碍信息的地方——局部代价地图只能看见当前激光，挡不住这种风险。
+
+### 规划失败时先查地图，不要先改 true
+
+`Failed to find a valid plan` 在稀疏地图上非常常见。内置 cafe 演示地图覆盖率
+约 17%，在 `allow_unknown=false` 下，`hall` 等较远目标点往往不可达。
+
+**正确做法：**
+
+```bash
+roslaunch ai_robot_nav mapping.launch   # 补建，直到覆盖率不再增长
+rosservice call /mapper/save_map
+bash scripts/sim.sh --map /path/to/new_map.yaml
+```
+
+**临时权宜（有安全风险）：**
+
+```bash
+bash scripts/sim.sh --allow-unknown
+```
+
+启动时 `map_manager` 会分析地图覆盖率，并检查各命名目的地在 `allow_unknown=false`
+下是否从起点可达；不可达时会打印警告与上述建议。**请勿把 `allow_unknown` 永久
+写进 `move_base.yaml`。**
+
+---
+
+## 八、常见问题
 
 | 现象 | 原因 | 处理 |
 |------|------|------|
@@ -290,6 +329,6 @@ TEB 是明确的下一步升级方向。
 | 定位慢慢发散 | 地图与实际环境不符 | 确认 world 与 map 是同一个环境；本车前向 180° 视场本就比 360° 雷达更易发散 |
 | `send_goal` 等不到 move_base | 导航栈没装或没启动 | `bash scripts/install_nav_stack.sh`，确认没加 `navigation:=false` |
 | 目标点被拒绝（REJECTED） | 目标落在地图外或障碍里 | 换个点；注意坐标是**地图坐标系**，受 `origin` 影响 |
-| 规划失败（ABORTED） | 到目标点没有可行路径 | 检查膨胀半径是否过大把通道堵死（`inflation_radius`） |
+| 规划失败（ABORTED） | 地图不完整且 `allow_unknown=false`；或通道被膨胀半径堵死 | **先补建地图**（见上一节）；查看 `map_manager` 启动警告；临时可用 `allow_unknown:=true` |
 | 机器人原地转圈不走 | 局部规划器选不出可行轨迹 | 多半是 `min_vel_trans` 过大或代价地图把车围死；先看 RViz 里的局部代价地图 |
 | 报 Extrapolation Error | tf 时间戳容差不够 | 调大 `transform_tolerance`（WSL 里 Gazebo 时钟抖动大） |

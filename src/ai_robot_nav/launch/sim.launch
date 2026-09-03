@@ -29,6 +29,8 @@
   <arg name="map_file" default="$(find ai_robot_nav)/maps/cafe.yaml"/>
   <arg name="destinations_file" default=""/>
   <arg name="idle_behavior" default="explore"/>
+  <!-- 见 README「地图与导航安全」。默认 false；地图覆盖不完整时才显式 true。 -->
+  <arg name="allow_unknown" default="false"/>
 
   <include file="$(find tjark_agv)/launch/cafe_world.launch">
     <arg name="gui" value="$(arg gui)"/>
@@ -55,6 +57,7 @@
     <arg name="map_file" value="$(arg map_file)"/>
     <arg name="destinations_file" value="$(arg destinations_file)"/>
     <arg name="params_file" value="$(arg params_file)"/>
+    <arg name="allow_unknown" value="$(arg allow_unknown)"/>
     <arg name="initial_pose_x" value="$(arg spawn_x)"/>
     <arg name="initial_pose_y" value="$(arg spawn_y)"/>
     <arg name="initial_pose_a" value="$(arg spawn_yaw)"/>

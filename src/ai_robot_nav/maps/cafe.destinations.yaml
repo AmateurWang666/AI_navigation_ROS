@@ -13,8 +13,10 @@
 #   rosrun ai_robot_nav send_goal --list
 #
 # 格式为 [x, y, yaw]，坐标是**地图坐标系**下的米与弧度，yaw 可省略（默认 0）。
-# 下面每个点都已确认落在地图的空闲区，且半径 0.35 m（车半径 0.25 + 余量）
-# 邻域内没有障碍或未知栅格——否则 move_base 会以 REJECTED 拒绝该目标。
+# 下面每个点都已确认落在地图的空闲区。启动时 map_manager 还会检查从起点
+# 出发、在 allow_unknown=false 下是否栅格可达；不可达时会打印警告。
+# 若 send_goal 报 Failed to find a valid plan，优先补建地图（见 README
+# 「地图与导航安全」），不要永久把 allow_unknown 设为 true。
 #
 # 名字用 ASCII 只是为了在终端里好敲，中文名同样支持。
 
