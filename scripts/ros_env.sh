@@ -27,6 +27,15 @@ if [ -f "$ROS1_WS/devel/setup.bash" ]; then
     source "$ROS1_WS/devel/setup.bash"
 fi
 
+# ros_ws 若在导航栈安装之前就构建过，其 setup.bash 不会链到 ros_nav_ws，
+# 后 source 反而会把 move_base 等包从搜索路径里盖掉。手动补回 overlay。
+if [ -d "$NAV_WS/devel" ]; then
+    case ":$CMAKE_PREFIX_PATH:" in
+        *":$NAV_WS/devel:"*) ;;
+        *) export CMAKE_PREFIX_PATH="$NAV_WS/devel${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}" ;;
+    esac
+fi
+
 # cafe 场景引用的模型都在仓库内。工作空间副本放前面：它在 WSL 本地盘上，
 # 比 /mnt/c 快得多；仓库副本兜底，让「还没 sync 就直接跑」也能用。
 for models in "$ROS1_WS/src/tjark_agv/models" "$REPO_DIR/src/tjark_agv/models"; do

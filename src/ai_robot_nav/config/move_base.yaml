@@ -57,8 +57,11 @@ shutdown_costmaps: false
 
 # ------------------------------------------------------------ 全局规划器
 GlobalPlanner:
-  allow_unknown: false        # 不允许穿越未知区域：用户地图之外没有障碍信息，
-                              # 放开会让机器人规划出穿过未探索空间的路径。
+  allow_unknown: true         # true：允许在未知栅格上规划。mapper_node 自建的地图
+                              # 覆盖率往往不高（cafe 默认图约 17% 已知），false 会导致
+                              # 稍远的目标点报 "Failed to find a valid plan"。
+                              # gmapping/cartographer 产出的完整地图若边界未知很少，
+                              # 可改回 false 禁止穿越未知区域。
   use_dijkstra: false         # false = A*。有目标点作为启发，展开的节点数远少于
                               # Dijkstra，室内地图上规划耗时通常低一个量级。
                               # 若发现路径明显绕远，改回 true 用 Dijkstra 求全局最优。
