@@ -66,8 +66,13 @@ migrate_dir "$HOME/ros_ws" "$ROS1_WS"
 migrate_dir "$HOME/ros_nav_ws" "$NAV_WS"
 
 if [ -d "$ROS1_WS/build" ] && grep -rq 'ros_ws' "$ROS1_WS/build" 2>/dev/null; then
-    echo "=== 清理构建缓存（仍引用旧路径 ~/ros_ws）==="
+    echo "=== 清理项目构建缓存（仍引用旧路径 ~/ros_ws）==="
     run rm -rf "$ROS1_WS/build" "$ROS1_WS/devel"
+fi
+if [ -d "$NAV_WS/build" ] && grep -rq 'ros_nav_ws' "$NAV_WS/build" 2>/dev/null; then
+    echo "=== 清理导航栈构建缓存（仍引用旧路径 ~/ros_nav_ws）==="
+    echo "    迁移后需重建导航栈: bash scripts/install_nav_stack.sh"
+    run rm -rf "$NAV_WS/build" "$NAV_WS/devel"
 fi
 
 echo
