@@ -96,7 +96,7 @@ print_banner() {
     echo "  成功标志：日志出现"
     echo "    FORWARD lin=0.15 ang=0.00 | clear ahead"
     echo "  另开终端看位移："
-    echo "    source ~/ros_ws/devel/setup.bash"
+    echo "    source ${ROS1_WS}/devel/setup.bash"
     echo "    rostopic echo /odom/pose/pose/position/x"
     if [ "$NAVIGATION" = true ]; then
         echo "  导航到指定目的地（另开终端）："

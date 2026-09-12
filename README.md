@@ -113,7 +113,16 @@
 cd /mnt/c/Users/ROG/Desktop/ROS_AI_Robot_Workspace
 bash scripts/install_ros_noetic.sh    # 装 ROS Noetic + Gazebo，并自动构建
 bash scripts/install_nav_stack.sh     # 装导航栈（目标点导航需要）
+bash scripts/align_wsl_layout.sh      # 若 WSL 里仍是旧的 ~/ros_ws 命名，一次性对齐
 ```
+
+WSL 侧目录与 Windows 仓库名对齐（源码在 `/mnt/c/.../ROS_AI_Robot_Workspace`，构建在本地盘）：
+
+| 路径 | 用途 |
+|------|------|
+| `/mnt/c/Users/ROG/Desktop/ROS_AI_Robot_Workspace` | 源码（Git 仓库，Windows 编辑） |
+| `~/ROS_AI_Robot_Workspace_ws` | Catkin 构建副本（`sync_ws.sh` 同步到这里） |
+| `~/ROS_AI_Robot_Workspace_nav_ws` | 导航栈 overlay（`install_nav_stack.sh`） |
 
 > **导航栈为什么要源码编译**：本机是 Ubuntu 24.04，而 ROS Noetic 官方只发布
 > Ubuntu 20.04 的二进制包；现有 Noetic 来自社区 PPA `ros-for-jammy`，
@@ -198,7 +207,7 @@ bash scripts/sim.sh
 **另开终端确认在动：**
 
 ```bash
-source /opt/ros/noetic/setup.bash && source ~/ros_ws/devel/setup.bash
+source /opt/ros/noetic/setup.bash && source ~/ROS_AI_Robot_Workspace_ws/devel/setup.bash
 rostopic echo /odom/pose/pose/position
 ```
 
@@ -209,7 +218,7 @@ rostopic echo /odom/pose/pose/position
 仿真起来之后，另开一个终端：
 
 ```bash
-source /opt/ros/noetic/setup.bash && source ~/ros_ws/devel/setup.bash
+source /opt/ros/noetic/setup.bash && source ~/ROS_AI_Robot_Workspace_ws/devel/setup.bash
 
 rosrun ai_robot_nav send_goal --list      # 看有哪些命名目的地
 rosrun ai_robot_nav send_goal hall        # 按名字去（需地图连通，见上文「地图与导航安全」）
@@ -273,7 +282,9 @@ ROS_AI_Robot_Workspace/
 │   └── real_robot.md          # 挪到实车的清单与标定顺序
 ├── scripts/
 │   ├── sim.sh                 # 仿真 + 导航一键脚本
-│   ├── sync_ws.sh             # 同步 src/ 到 ~/ros_ws 并 catkin_make
+│   ├── sync_ws.sh             # 同步 src/ 到 ~/ROS_AI_Robot_Workspace_ws 并 catkin_make
+│   ├── wsl_paths.sh           # WSL 路径与 Windows 仓库目录名对齐
+│   ├── align_wsl_layout.sh    # 迁移旧 ~/ros_ws 命名、清理冗余目录
 │   ├── install_ros_noetic.sh  # WSL 首次安装
 │   ├── install_nav_stack.sh   # 源码编译 move_base/amcl/map_server
 │   ├── run_tests.sh           # pytest

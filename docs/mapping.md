@@ -29,7 +29,7 @@ bash scripts/install_nav_stack.sh
 所以换 apt 镜像源是解决不了的：这些包对本发行版根本不存在。好在导航栈的依赖
 （`tf2_ros`、`pcl_ros`、`laser_geometry`、`nodelet`、`dynamic_reconfigure` 等）
 在 PPA 里齐全，`map_server` 需要的 `libsdl1.2-dev` 也在 Ubuntu 官方源里，
-因此源码编译可行。脚本会把它们装到独立的工作空间 `~/ros_nav_ws`，
+因此源码编译可行。脚本会把它们装到独立的工作空间 `~/ROS_AI_Robot_Workspace_nav_ws`，
 由 `scripts/ros_env.sh` 作为底层 overlay 自动加载，不干扰日常的
 `sync_ws.sh` 快速构建循环。
 

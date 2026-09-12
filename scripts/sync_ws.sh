@@ -8,11 +8,13 @@
 #   bash scripts/sync_ws.sh --build      # 同步 + catkin_make
 #   bash scripts/sync_ws.sh --build --test
 #
-# 环境变量 ROS1_WS 指定工作空间，默认 ~/ros_ws。
+# 环境变量 ROS1_WS 可覆盖 WSL 构建路径（默认 ~/ROS_AI_Robot_Workspace_ws，见 wsl_paths.sh）。
 
 set -o pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WS="${ROS1_WS:-$HOME/ros_ws}"
+# shellcheck source=scripts/wsl_paths.sh
+source "$REPO_DIR/scripts/wsl_paths.sh"
+WS="$ROS1_WS"
 PACKAGES="ai_robot_nav tjark_agv"
 
 DO_BUILD=0

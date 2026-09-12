@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # 共享 ROS 环境变量（被 sim.sh / sync_ws.sh 引用，也可手动 source）。
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ROS1_WS="${ROS1_WS:-$HOME/ros_ws}"
-NAV_WS="${NAV_WS:-$HOME/ros_nav_ws}"
-NAV_PARAMS="${NAV_PARAMS:-$ROS1_WS/src/ai_robot_nav/config/nav_params.yaml}"
+# shellcheck source=scripts/wsl_paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/wsl_paths.sh"
 
 if [ ! -f /opt/ros/noetic/setup.bash ]; then
     echo "ROS Noetic not found. Run: bash $REPO_DIR/scripts/install_ros_noetic.sh"
@@ -27,7 +25,7 @@ if [ -f "$ROS1_WS/devel/setup.bash" ]; then
     source "$ROS1_WS/devel/setup.bash"
 fi
 
-# ros_ws 若在导航栈安装之前就构建过，其 setup.bash 不会链到 ros_nav_ws，
+# 构建工作空间若在导航栈安装之前就编译过，其 setup.bash 可能不链到 _nav_ws，
 # 后 source 反而会把 move_base 等包从搜索路径里盖掉。手动补回 overlay。
 if [ -d "$NAV_WS/devel" ]; then
     case ":$CMAKE_PREFIX_PATH:" in
@@ -48,4 +46,4 @@ done
 # 反复尝试联网拉取，WSL 上因此要卡好几分钟才出 /scan。
 export GAZEBO_MODEL_DATABASE_URI=""
 
-export REPO_DIR ROS1_WS NAV_WS NAV_PARAMS
+export REPO_DIR ROS1_WS NAV_WS NAV_PARAMS PROJECT_NAME

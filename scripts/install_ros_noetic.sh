@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 #
-# 在 Ubuntu 24.04 WSL 上安装 ROS Noetic + Gazebo Classic，并构建 ros_ws。
+# 在 Ubuntu 24.04 WSL 上安装 ROS Noetic + Gazebo Classic，并构建 WSL 工作空间。
 #
 # 背景：官方 Noetic 只支持 Ubuntu 20.04；24.04 需用社区 PPA。
 # 若你已有 Ubuntu 20.04，可跳过 PPA，直接用官方源：
 #   http://wiki.ros.org/noetic/Installation/Ubuntu
 #
 # 用法（WSL 终端，需 sudo 密码）：
-#   cd /mnt/c/Users/ROG/Desktop/ROS2_AI_Robot_Workspace
+#   cd /mnt/c/Users/ROG/Desktop/ROS_AI_Robot_Workspace
 #   bash ./scripts/install_ros_noetic.sh
 #
 # 安装完成后新开终端：
-#   cd /mnt/c/Users/ROG/Desktop/ROS2_AI_Robot_Workspace
+#   cd /mnt/c/Users/ROG/Desktop/ROS_AI_Robot_Workspace
 #   bash ./scripts/sim.sh
 
 set -o pipefail
@@ -105,7 +105,8 @@ echo "Installation complete."
 echo
 echo "Add to ~/.bashrc (optional):"
 echo "  echo 'source /opt/ros/noetic/setup.bash' >> ~/.bashrc"
-echo "  echo 'source ~/ros_ws/devel/setup.bash' >> ~/.bashrc"
+echo "  echo 'source ~/ROS_AI_Robot_Workspace_ws/devel/setup.bash' >> ~/.bashrc"
+echo "  # 若仓库目录名不同，以 scripts/wsl_paths.sh 推导的路径为准"
 echo
 echo "Start simulation (new terminal):"
 echo "  cd $REPO_DIR"

@@ -10,19 +10,19 @@
 # （move_base / amcl / map_server / costmap_2d 全都没有）。换 apt 镜像源解决不了，
 # 因为这些包对本发行版根本不存在。好在导航栈的依赖 PPA 里齐全，源码编译可行。
 #
-# 装到独立工作空间而不是 ~/ros_ws：
-# ~/ros_ws 由 sync_ws.sh 反复重建，且它用 CATKIN_WHITELIST_PACKAGES 只构建本仓库
-# 的两个包。第三方源码放进去会被白名单跳过、或拖慢日常构建循环。因此这里单独建
-# 一个 ~/ros_nav_ws，由 ros_env.sh 作为底层 overlay 先 source，~/ros_ws 叠在其上。
+# 装到独立工作空间而不是项目 _ws（默认 ~/ROS_AI_Robot_Workspace_ws）：
+# 项目构建目录由 sync_ws.sh 管理；导航栈单独放在 ~/ROS_AI_Robot_Workspace_nav_ws，
+# 由 ros_env.sh 作为底层 overlay 先 source，项目 _ws 叠在其上。
 #
 # 环境变量：
-#   NAV_WS           导航栈工作空间，默认 ~/ros_nav_ws
+#   NAV_WS           导航栈工作空间，默认 ~/ROS_AI_Robot_Workspace_nav_ws
 #   NAV_BUILD_JOBS   并行编译任务数，默认按内存推算（见下）
 
 set -o pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NAV_WS="${NAV_WS:-$HOME/ros_nav_ws}"
+# shellcheck source=scripts/wsl_paths.sh
+source "$REPO_DIR/scripts/wsl_paths.sh"
 
 # 并行度按「内存」而不是「核数」推算。这台机器 32 核 / 10 GB：catkin_make 默认
 # 开满 32 路，而 costmap_2d、move_base 这类重模板 C++ 单个 cc1plus 峰值可达 1-2 GB，
