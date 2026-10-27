@@ -9,8 +9,10 @@ from sensor_msgs.msg import LaserScan
 from ai_robot_nav.lifecycle import install_shutdown_signals
 from ai_robot_nav.log_throttle import LogThrottle
 from ai_robot_nav.motion import clamp, clamp_twist
-from ai_robot_nav.ros_params import param, param_bool, param_float
-from ai_robot_nav.scan_utils import sector_min_distance
+from ai_robot_nav.ros_params import global_param_float, param, param_bool, param_float
+from ai_robot_nav.scan_utils import (
+    SectorDistanceFilter, sector_min_distance_inflated,
+)
 
 
 class SafetyNode:
@@ -24,6 +26,11 @@ class SafetyNode:
         self._ai_cmd_stamp = None
         self._scan_stamp = None
         self._emergency = False
+        self._sector_filter = SectorDistanceFilter(
+            self._scan_persistence_sec,
+            self._scan_persistence_decay,
+            self._scan_persistence_release,
+        )
 
         output_type = TwistStamped if self._cmd_stamped else Twist
         self._cmd_stamped_type = output_type
@@ -61,6 +68,18 @@ class SafetyNode:
         self._allow_reverse = param_bool('allow_reverse_in_emergency', True)
         self._allow_rotate = param_bool('allow_rotate_in_emergency', True)
         self._passthrough = param_bool('passthrough_mode', False)
+        self._scan_inflation_radius = max(
+            0.0, global_param_float('/scan_processing/inflation_radius', 0.10))
+        self._scan_inflation_max_range = max(
+            0.0, global_param_float('/scan_processing/inflation_max_range', 1.8))
+        self._scan_persistence_sec = max(
+            0.0, global_param_float('/scan_processing/safety_persistence_sec', 0.18))
+        self._scan_persistence_decay = max(
+            0.0, global_param_float('/scan_processing/persistence_decay_rate', 0.35))
+        self._scan_persistence_release = max(
+            self._clear_distance + 0.05,
+            global_param_float(
+                '/scan_processing/safety_persistence_release_distance', 0.0))
 
         if self._clear_distance < self._stop_distance:
             rospy.logwarn(
@@ -69,9 +88,14 @@ class SafetyNode:
             self._clear_distance = self._stop_distance
 
     def _scan_callback(self, msg: LaserScan):
-        self._scan_stamp = rospy.Time.now()
+        now = rospy.Time.now()
+        self._scan_stamp = now
 
-        front = sector_min_distance(msg, self._front_center_angle, self._front_half_angle)
+        front = sector_min_distance_inflated(
+            msg, self._front_center_angle, self._front_half_angle,
+            self._scan_inflation_radius, self._scan_inflation_max_range)
+        front, _, _, _ = self._sector_filter.apply(
+            front, None, None, None, now.to_sec(), msg.range_max)
         was_emergency = self._emergency
 
         if front is None:

@@ -12,9 +12,159 @@ RPLidar 之类的雷达分辨率、起始角、视场角都不同。把度数当
 """
 
 import math
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from sensor_msgs.msg import LaserScan
+
+
+def _valid_range(distance: float, scan: LaserScan) -> bool:
+    if math.isnan(distance) or math.isinf(distance):
+        return False
+    if distance < scan.range_min or distance > scan.range_max:
+        return False
+    return True
+
+
+def is_obstacle_reading(distance: Optional[float], range_max: float) -> bool:
+    """区分「量程内命中障碍」与「量程内空旷（range_max / inf）」。"""
+    if distance is None:
+        return False
+    return distance < range_max - 1e-3
+
+
+def copy_laser_scan(scan: LaserScan) -> LaserScan:
+    out = LaserScan()
+    for attr in (
+        'header', 'angle_min', 'angle_max', 'angle_increment',
+        'time_increment', 'scan_time', 'range_min', 'range_max',
+    ):
+        setattr(out, attr, getattr(scan, attr))
+    out.ranges = list(scan.ranges)
+    if scan.intensities:
+        out.intensities = list(scan.intensities)
+    return out
+
+
+def inflate_laser_scan(
+    scan: LaserScan,
+    inflation_radius: float,
+    max_range: float = 0.0,
+    center_deg: Optional[float] = None,
+    half_width_deg: Optional[float] = None,
+) -> LaserScan:
+    """把有效回波在角度上展宽，等效于给点状障碍加「体积」。
+
+    ``max_range`` 大于 0 时，只对近距离回波展宽，远处侧向桌腿不参与。
+
+    ``center_deg`` 与 ``half_width_deg`` 同时给出时，只从已经落在该扇区内的
+    回波向外摊。扇区外的墙不能写进扇区，否则近距离侧墙的展宽角会盖过窄通路扇区。
+    """
+    if scan is None or inflation_radius <= 0.0 or not len(scan.ranges):
+        return scan
+    if scan.angle_increment == 0.0:
+        return scan
+
+    out = copy_laser_scan(scan)
+    inflated: List[float] = list(out.ranges)
+    count = len(inflated)
+    increment = abs(scan.angle_increment)
+    limit_to_sector = center_deg is not None and half_width_deg is not None
+    if limit_to_sector:
+        center = normalize_angle(math.radians(center_deg))
+        half_width = math.radians(abs(half_width_deg))
+
+    for index, distance in enumerate(scan.ranges):
+        if limit_to_sector:
+            angle = scan.angle_min + index * scan.angle_increment
+            if abs(normalize_angle(angle - center)) > half_width:
+                continue
+        if not _valid_range(distance, scan):
+            continue
+        if max_range > 0.0 and distance > max_range:
+            continue
+
+        half_angle = math.atan(inflation_radius / max(distance, scan.range_min + 1e-6))
+        half_bins = max(1, int(math.ceil(half_angle / increment)))
+
+        for offset in range(-half_bins, half_bins + 1):
+            target = index + offset
+            if target < 0 or target >= count:
+                continue
+            if _valid_range(inflated[target], scan):
+                inflated[target] = min(inflated[target], distance)
+            else:
+                inflated[target] = distance
+
+    out.ranges = inflated
+    return out
+
+
+class SectorDistanceFilter:
+    """跨帧保留最近扇区距离，避免稀疏点状障碍在 miss 帧被当成空旷。
+
+    ``decay_rate`` 让记忆距离随时间增大（模拟已经绕过障碍）；超过 ``release_distance``
+    或 ``persistence_sec`` 后释放，避免空旷地带长期保持「高度警戒」。
+    """
+
+    def __init__(
+        self,
+        persistence_sec: float = 0.0,
+        decay_rate: float = 0.0,
+        release_distance: float = 0.0,
+    ):
+        self._persistence = max(0.0, persistence_sec)
+        self._decay_rate = max(0.0, decay_rate)
+        self._release_distance = max(0.0, release_distance)
+        self._stored: List[Optional[float]] = [None, None, None, None]
+        self._times: List[float] = [0.0, 0.0, 0.0, 0.0]
+
+    def apply(
+        self,
+        front: Optional[float],
+        left: Optional[float],
+        right: Optional[float],
+        rear: Optional[float],
+        now: float,
+        range_max: float,
+    ) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+        if self._persistence <= 0.0:
+            return front, left, right, rear
+
+        values = [front, left, right, rear]
+        out: List[Optional[float]] = []
+        for index, value in enumerate(values):
+            if is_obstacle_reading(value, range_max):
+                self._stored[index] = value
+                self._times[index] = now
+                out.append(value)
+                continue
+
+            # 盲区不是空旷。用上一帧的距离盖掉 None，安全层会把无效雷达当成
+            # 前方还有数，扫描仍在到达，超时停车也不会触发。记忆留着，
+            # 下一帧若恢复成真实障碍或空旷读数，仍按原规则接上。
+            if value is None:
+                out.append(None)
+                continue
+
+            stored = self._stored[index]
+            if stored is None:
+                out.append(value)
+                continue
+
+            elapsed = now - self._times[index]
+            aged = stored + self._decay_rate * elapsed
+            release = (
+                elapsed > self._persistence
+                or (self._release_distance > 0.0 and aged >= self._release_distance)
+            )
+            if release:
+                self._stored[index] = None
+                out.append(value)
+                continue
+
+            out.append(aged)
+
+        return out[0], out[1], out[2], out[3]
 
 
 def normalize_angle(angle: float) -> float:
@@ -74,12 +224,33 @@ def sector_min_distance(
     return scan.range_max if saw_clear else None
 
 
+def sector_min_distance_inflated(
+    scan: LaserScan,
+    center_deg: float,
+    half_width_deg: float,
+    inflation_radius: float = 0.0,
+    max_range: float = 0.0,
+) -> Optional[float]:
+    """扇区最近距离。展宽只从本扇区已有的回波向外摊。"""
+    if inflation_radius <= 0.0 or scan is None:
+        return sector_min_distance(scan, center_deg, half_width_deg)
+    inflated = inflate_laser_scan(
+        scan, inflation_radius, max_range,
+        center_deg=center_deg, half_width_deg=half_width_deg)
+    return sector_min_distance(inflated, center_deg, half_width_deg)
+
+
 def describe_environment(
     scan: LaserScan,
     front_half_deg: float,
     side_center_deg: float,
     side_half_deg: float,
     front_center_deg: float = 0.0,
+    path_half_deg: float = 0.0,
+    inflation_radius: float = 0.0,
+    inflation_max_range: float = 0.0,
+    sector_filter: Optional[SectorDistanceFilter] = None,
+    filter_time: Optional[float] = None,
 ) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
     """一次取出前、左、右、后四个方向的最近障碍距离。
 
@@ -96,11 +267,31 @@ def describe_environment(
 
     前提：雷达 z 轴与车体 z 轴同向（未倒装）。倒装会额外镜像扫描角的正负号，
     此处不做处理。
+
+    ``path_half_deg`` 若大于 0，则「前方」取更窄的通路扇区（默认 ±12°），用于直行/
+    转向决策。宽扇区 ``front_half_deg`` 会把侧墙斜射进前方读数，贴墙巡航时
+    ``ahead`` 会被误判为 0.55 m 而长期卡在迟滞带。
+
+    ``inflation_radius`` 与 ``sector_filter`` 用于稀疏点状障碍（细桌腿等）。
+    每个扇区只展宽自己内部的回波，侧向的墙不会被摊进前方通路。
     """
-    front = sector_min_distance(scan, front_center_deg, front_half_deg)
-    left = sector_min_distance(scan, front_center_deg + side_center_deg, side_half_deg)
-    right = sector_min_distance(scan, front_center_deg - side_center_deg, side_half_deg)
-    rear = sector_min_distance(scan, front_center_deg + 180.0, front_half_deg)
+    path_half = path_half_deg if path_half_deg > 0.0 else front_half_deg
+    front = sector_min_distance_inflated(
+        scan, front_center_deg, path_half, inflation_radius, inflation_max_range)
+    left = sector_min_distance_inflated(
+        scan, front_center_deg + side_center_deg, side_half_deg,
+        inflation_radius, inflation_max_range)
+    right = sector_min_distance_inflated(
+        scan, front_center_deg - side_center_deg, side_half_deg,
+        inflation_radius, inflation_max_range)
+    rear = sector_min_distance_inflated(
+        scan, front_center_deg + 180.0, front_half_deg,
+        inflation_radius, inflation_max_range)
+
+    if sector_filter is not None and filter_time is not None:
+        return sector_filter.apply(
+            front, left, right, rear, filter_time, scan.range_max)
+
     return front, left, right, rear
 
 

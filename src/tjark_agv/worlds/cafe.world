@@ -89,6 +89,20 @@
         <interpolate_x>true</interpolate_x>
       </animation>
 
+      <!-- 圆柱碰撞体：LiDAR 射线与 move_base 代价地图可检测行人 -->
+      <link name="body_collision_link">
+        <pose>0 0 -0.35 0 0 0</pose>
+        <collision name="body_collision">
+          <geometry>
+            <cylinder>
+              <radius>0.30</radius>
+              <length>1.75</length>
+            </cylinder>
+          </geometry>
+        </collision>
+      </link>
+      <plugin name="actor1_collisions" filename="libtjark_actor_collisions.so"/>
+
       <plugin name="actor1_plugin" filename="libActorPlugin.so">
         <target>0 -5 1.2138</target>
         <target_weight>1.15</target_weight>
@@ -114,6 +128,20 @@
         <scale>1.000000</scale>
         <interpolate_x>true</interpolate_x>
       </animation>
+
+      <link name="body_collision_link">
+        <pose>0 0 -0.35 0 0 0</pose>
+        <collision name="body_collision">
+          <geometry>
+            <cylinder>
+              <radius>0.30</radius>
+              <length>1.75</length>
+            </cylinder>
+          </geometry>
+        </collision>
+      </link>
+      <plugin name="actor2_collisions" filename="libtjark_actor_collisions.so"/>
+
       <plugin name="actor2_plugin" filename="libActorPlugin.so">
         <target>3 2 1.24</target>
         <target_weight>1.15</target_weight>

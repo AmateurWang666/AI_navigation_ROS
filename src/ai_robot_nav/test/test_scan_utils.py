@@ -14,7 +14,15 @@ import math
 import pytest
 from sensor_msgs.msg import LaserScan
 
-from ai_robot_nav.scan_utils import describe_environment, format_distance, sector_min_distance
+from ai_robot_nav.navigator import NavConfig, plan
+from ai_robot_nav.scan_utils import (
+    SectorDistanceFilter,
+    describe_environment,
+    format_distance,
+    inflate_laser_scan,
+    sector_min_distance,
+    sector_min_distance_inflated,
+)
 
 
 def make_scan(ranges, angle_min=0.0, angle_increment=None, range_min=0.12, range_max=3.5):
@@ -168,3 +176,129 @@ def test_format_distance_spells_out_the_blind_case():
     """盲区必须在提示词里写成文字，不能伪装成一个数字距离。"""
     assert format_distance(1.234) == '1.23m'
     assert '未知' in format_distance(None)
+
+
+def test_inflate_laser_scan_spreads_a_single_hit_to_neighbors():
+    """单点回波展宽后，相邻射线也应看到障碍。"""
+    scan = turtlebot_scan(fill=math.inf)
+    scan.ranges[0] = 2.0
+    inflated = inflate_laser_scan(scan, 0.15)
+
+    assert inflated.ranges[0] == pytest.approx(2.0)
+    assert inflated.ranges[5] == pytest.approx(2.0)
+    assert inflated.ranges[90] == math.inf
+
+
+def test_sector_inflation_keeps_an_inside_pole_and_ignores_outside_hits():
+    """扇区内的细柱仍然可见；扇区外的回波不能被展进来。"""
+    increment = math.pi / 359.0
+    scan = make_scan([math.inf] * 360, angle_min=math.pi / 2.0, angle_increment=increment)
+    scan.ranges[180] = 1.5
+    assert sector_min_distance_inflated(scan, 180.0, 30.0, 0.15) == pytest.approx(1.5)
+
+    scan.ranges[180] = math.inf
+    scan.ranges[250] = 1.5  # 约 +35°，落在 ±30° 之外
+    assert sector_min_distance(scan, 180.0, 30.0) == pytest.approx(scan.range_max)
+    assert sector_min_distance_inflated(
+        scan, 180.0, 30.0, 0.15) == pytest.approx(scan.range_max)
+
+
+def test_sector_filter_holds_recent_obstacle_across_miss_frames():
+    filt = SectorDistanceFilter(persistence_sec=0.5)
+    front, _, _, _ = filt.apply(0.8, None, None, None, 1.0, 20.0)
+    assert front == pytest.approx(0.8)
+
+    front, _, _, _ = filt.apply(20.0, None, None, None, 1.2, 20.0)
+    assert front == pytest.approx(0.8)
+
+    front, _, _, _ = filt.apply(20.0, None, None, None, 2.0, 20.0)
+    assert front == pytest.approx(20.0)
+
+
+def test_sector_filter_does_not_hide_a_blind_reading():
+    """None 是盲区，不能用记忆里的旧距离假装前方还有数。记忆本身保留。"""
+    filt = SectorDistanceFilter(persistence_sec=0.5)
+    filt.apply(2.0, None, None, None, 1.0, 20.0)
+
+    front, _, _, _ = filt.apply(None, None, None, None, 1.1, 20.0)
+    assert front is None
+
+    front, _, _, _ = filt.apply(20.0, None, None, None, 1.2, 20.0)
+    assert front == pytest.approx(2.0)
+
+
+def test_sector_filter_decays_and_releases_ghost_obstacles():
+    filt = SectorDistanceFilter(
+        persistence_sec=0.5, decay_rate=0.5, release_distance=1.0)
+    filt.apply(0.6, None, None, None, 1.0, 20.0)
+    front, _, _, _ = filt.apply(20.0, None, None, None, 1.4, 20.0)
+    assert front == pytest.approx(0.8)
+
+    front, _, _, _ = filt.apply(20.0, None, None, None, 1.9, 20.0)
+    assert front == pytest.approx(20.0)
+
+
+def test_inflate_skips_returns_beyond_max_range():
+    scan = turtlebot_scan(fill=math.inf)
+    scan.ranges[0] = 3.0
+    inflated = inflate_laser_scan(scan, 0.15, max_range=2.0)
+    assert inflated.ranges[0] == pytest.approx(3.0)
+    assert inflated.ranges[1] == math.inf
+
+    scan.ranges[0] = 1.5
+    inflated = inflate_laser_scan(scan, 0.15, max_range=2.0)
+    assert inflated.ranges[5] == pytest.approx(1.5)
+
+
+def test_path_half_angle_ignores_side_wall_in_wide_front_cone():
+    """贴墙巡航：侧墙在宽扇区里会污染 ahead，窄通路扇区应保持空旷。"""
+    increment = math.pi / 359.0
+    scan = make_scan([math.inf] * 360, angle_min=math.pi / 2.0, angle_increment=increment)
+    scan.ranges[180] = 3.0   # 正前方空旷
+    scan.ranges[152] = 0.45  # 右前方约 15° 处侧墙（宽 ±30° 会采信，窄 ±12° 应忽略）
+
+    wide_front, _, _, _ = describe_environment(
+        scan, 30.0, 90.0, 30.0, 180.0, path_half_deg=0.0)
+    path_front, _, _, _ = describe_environment(
+        scan, 30.0, 90.0, 30.0, 180.0, path_half_deg=12.0)
+
+    assert wide_front == pytest.approx(0.45)
+    assert path_front == pytest.approx(3.0)
+
+
+def test_path_half_angle_ignores_side_wall_when_inflation_is_on():
+    """近处侧墙的展宽角会盖过 ±12°，但扇区外的回波不允许写进通路。"""
+    increment = math.pi / 359.0
+    scan = make_scan([math.inf] * 360, angle_min=math.pi / 2.0, angle_increment=increment)
+    scan.ranges[180] = 3.0
+    scan.ranges[152] = 0.45
+
+    front, _, _, _ = describe_environment(
+        scan, 30.0, 90.0, 30.0, 180.0,
+        path_half_deg=12.0,
+        inflation_radius=0.10,
+        inflation_max_range=1.8)
+    assert front == pytest.approx(3.0)
+
+
+def test_sparse_table_leg_triggers_turn_after_processing():
+    """展宽 + 跨帧记忆后，漫游策略应对细柱提前转向，而不是一直 FORWARD。"""
+    increment = math.pi / 359.0
+    scan = make_scan([math.inf] * 360, angle_min=math.pi / 2.0, angle_increment=increment)
+    scan.ranges[180] = 0.50
+
+    filt = SectorDistanceFilter(persistence_sec=0.5)
+    config = NavConfig(forward_clearance=0.70, turn_clearance=0.55)
+
+    front, left, right, rear = describe_environment(
+        scan, 30.0, 90.0, 30.0, 180.0,
+        inflation_radius=0.15, sector_filter=filt, filter_time=1.0)
+    decision = plan(front, left, right, config, rear=rear)
+    assert decision.action in ('TURN_LEFT', 'TURN_RIGHT')
+
+    scan.ranges[180] = math.inf
+    front, left, right, rear = describe_environment(
+        scan, 30.0, 90.0, 30.0, 180.0,
+        inflation_radius=0.15, sector_filter=filt, filter_time=1.1)
+    decision = plan(front, left, right, config, rear=rear)
+    assert decision.action in ('TURN_LEFT', 'TURN_RIGHT')

@@ -18,8 +18,12 @@ from ai_robot_nav.llm_client import (
 from ai_robot_nav.log_throttle import LogThrottle
 from ai_robot_nav.motion import clamp
 from ai_robot_nav.navigator import TURNING_ACTIONS, NavConfig, plan
-from ai_robot_nav.ros_params import param, param_bool, param_float, param_int
-from ai_robot_nav.scan_utils import describe_environment, format_distance
+from ai_robot_nav.ros_params import (
+    global_param_float, param, param_bool, param_float, param_int,
+)
+from ai_robot_nav.scan_utils import (
+    SectorDistanceFilter, describe_environment, format_distance,
+)
 
 SYSTEM_PROMPT = """你是移动机器人的视觉安全观察员。你不负责计算速度。
 机器人的转向和速度由激光雷达数据确定性地计算，你的任务只是判断
@@ -79,6 +83,11 @@ class AINavNode:
         self._turn_side = None
         self._turn_side_time = 0.0
         self._turn_started = None
+        self._sector_filter = SectorDistanceFilter(
+            self._scan_persistence_sec,
+            self._scan_persistence_decay,
+            self._scan_persistence_release,
+        )
 
         self._cmd_publisher = rospy.Publisher(self._cmd_topic, Twist, queue_size=10)
         self._scan_sub = rospy.Subscriber(
@@ -125,6 +134,7 @@ class AINavNode:
         self._image_height = param_int('image_height', 240)
         self._jpeg_quality = param_int('jpeg_quality', 60)
         self._front_half_angle = param_float('front_half_angle', 30.0)
+        self._path_half_angle = param_float('path_half_angle', 12.0)
         self._front_center_angle = param_float('front_center_angle', 0.0)
         self._side_center_angle = param_float('side_center_angle', 90.0)
         self._side_half_angle = param_float('side_half_angle', 30.0)
@@ -133,6 +143,16 @@ class AINavNode:
         self._lidar_only_fallback = param_bool('lidar_only_fallback', True)
         self._caution_confirmations = max(1, param_int('caution_confirmations', 2))
         self._turn_latch_timeout = max(0.0, param_float('turn_latch_timeout', 3.0))
+        self._scan_inflation_radius = max(
+            0.0, global_param_float('/scan_processing/inflation_radius', 0.10))
+        self._scan_inflation_max_range = max(
+            0.0, global_param_float('/scan_processing/inflation_max_range', 1.8))
+        self._scan_persistence_sec = max(
+            0.0, global_param_float('/scan_processing/persistence_sec', 0.25))
+        self._scan_persistence_decay = max(
+            0.0, global_param_float('/scan_processing/persistence_decay_rate', 0.35))
+        self._scan_persistence_release = max(
+            0.0, global_param_float('/scan_processing/persistence_release_distance', 1.10))
 
         forward_clearance = param_float('forward_clearance', 0.6)
         turn_clearance = param_float('turn_clearance', 0.5)
@@ -224,11 +244,19 @@ class AINavNode:
                 'LiDAR data missing or stale; commanding stop.',
                 period=5.0)
             self._publish_stop()
+            # 断流的这段时间不能算进连续转向。否则雷达一恢复，累计时长就可能
+            # 越过 escape_reverse_time，车会在后向盲区倒车。方向锁存保留。
+            self._turn_started = None
             return
 
         front, left, right, rear = describe_environment(
             scan, self._front_half_angle, self._side_center_angle, self._side_half_angle,
-            self._front_center_angle)
+            self._front_center_angle,
+            path_half_deg=self._path_half_angle,
+            inflation_radius=self._scan_inflation_radius,
+            inflation_max_range=self._scan_inflation_max_range,
+            sector_filter=self._sector_filter,
+            filter_time=now.to_sec())
         assessment = self._fresh_assessment(now)
 
         if assessment is None and not self._lidar_only_fallback:

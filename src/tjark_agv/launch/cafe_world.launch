@@ -14,6 +14,10 @@
   并订阅 /cmd_vel，因此不开窗口也能完整跑导航。
 -->
 <launch>
+  <!-- 插件装在 lib/（devel 与 install 相同），不在 lib/tjark_agv/。 -->
+  <env name="GAZEBO_PLUGIN_PATH"
+       value="$(find tjark_agv)/../../lib:$(optenv GAZEBO_PLUGIN_PATH)"/>
+
   <arg name="gui" default="false"/>
   <arg name="headless" default="true"/>
   <arg name="paused" default="false"/>

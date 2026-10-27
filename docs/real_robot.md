@@ -1,9 +1,88 @@
-# 从仿真挪到实车
+# 从仿真到实车
 
-本项目当前只在仿真中运行。这份清单说明上车前需要做什么，以及为什么导航代码
-本身不用改。
+## 最终目标
 
-## 为什么导航代码不用改
+实车（ROS 1 Noetic 上的这台 tjark_agv）先自主完成**激光漫游和急停**：
+
+- 没有地图、没有目标点
+- `/scan` 决定直行或转向，视觉模型只能让车更慢或停下
+- `safety_node` 是 `/cmd_vel` 的唯一发布者
+- 雷达按已给出的模型使用：前向 180°，360 线，10 Hz，量程 0.12–20 m，正前方对应扫描角 180°
+
+目标点导航（建图、`amcl`、`move_base`）排在漫游验收之后。仓库里这套代码已经能在
+仿真里用，`real.launch` 尚未把它挂上。
+
+## 现在到哪一步
+
+只在 cafe 仿真里跑。
+
+| 入口 | 实际拉起的内容 |
+|------|----------------|
+| `sim.launch` | Gazebo cafe、漫游、急停，并且**默认还有**地图和 `move_base` |
+| `real.launch` | 车辆描述 + 漫游层（`ai_nav.launch`）。底盘和雷达驱动的位置是空的，没有 `navigation.launch` |
+
+差速插件仍是轮距 **0.34 m**、轮径 **0.12 m**。实车数据是轮距 **0.3844 m**、轮径 **125 mm**。
+
+## 实现路径
+
+### 1. 仿真对齐实车尺寸
+
+修改 `src/tjark_agv/urdf/tjark_agv.controller.xacro`：
+
+- `wheelSeparation` → `0.3844`
+- `wheelDiameter` → `0.125`
+
+URDF 里左右轮关节 `y = ±0.192205` 保持不动。改完后仿真 `/odom` 的尺度才和实车几何一致。
+`amcl` 的 `odom_alpha*` 先留着，等第四步再按新里程计收紧。
+
+### 2. cafe 里验收激光漫游和急停
+
+```bash
+bash scripts/sim.sh --lidar
+```
+
+看四件事：前方空就直行；近障就转向，且转向朝更开阔的一侧；贴脸急停后不再往前挤；
+通路打开后能从急停恢复。细柱靠扇区内展宽和短时记忆，整扇区无效（`None`）仍必须急停。
+
+cafe 行人带圆柱碰撞体，用来确认车会绕开或停下，而不是从身体里穿过去。
+
+### 3. 实车挂底盘和雷达，空场标定
+
+在 `real.launch` 里已经标出的位置接入：
+
+| 需要 | 话题 | 类型 |
+|------|------|------|
+| 激光雷达驱动 | `/scan` | `sensor_msgs/LaserScan` |
+| 底盘驱动 | 订阅 `/cmd_vel` | `geometry_msgs/Twist` |
+| 里程计（底盘一并给出即可） | `/odom` | `nav_msgs/Odometry` |
+
+相机（`/my_camera/color/image_raw`）不是这一步的条件。话题名对不上时改
+`nav_params.yaml`，不要改节点。底盘若只接受 `TwistStamped`，把 `safety_node` 的
+`cmd_stamped` 改成 `true`。
+
+`real.launch` 目前没有 `idle_behavior` 参数，一挂上驱动就会按 `ai_nav.launch` 的默认值开始漫游。接驱动时把这个参数传进 `ai_nav.launch`。首次上电用 `stop`，确认急停之后再改成 `explore`。
+
+空场要核对的三项：
+
+1. **`front_center_angle`。** 给出的值是 `180`。正前方 1 m 放一个箱子，在 `/scan` 里找出最小距离的下标 `i`，核对 `degrees(angle_min + i * angle_increment)` 是不是 180。对得上就不要改；对不上左右会反，车会朝障碍转。日志里的 `turning toward more open side (left …, right …)` 应和眼睛看到的左右一致。
+2. **`stop_distance` / `clear_distance`。** 仿真初值 0.24 / 0.34 m 从雷达算起，雷达在 `base_link` 前方 0.166 m。按车头外廓和实际制动距离重测，并保持 `clear_distance > stop_distance`。
+3. **`escape_reverse_time` 置 `0`。** 雷达后方没有采样点。没有后向传感器或防撞条时不要边退边转，脱困只原地转。
+
+速度从 `nav_params.yaml` 的保守初值开始：先关视觉，原地确认 `turn_speed` 转得动，再以
+`cruise_speed` 直行测制动，然后才加 `cruise_speed` 和 `max_linear`。视觉最后开，它只能让车更慢。
+
+硬件型号见 [platform.md](platform.md#实车硬件清单)。本仓库没有底盘、雷达、IMU 驱动。
+
+### 4. 再上地图和目标点导航
+
+漫游和急停在实车上稳定之后，再把 `navigation.launch` 加进实车启动，并准备该环境的地图。
+步骤、`allow_unknown` 和规划器选型见 [mapping.md](mapping.md)。
+
+这一步才需要可信的 `/odom`。开发机是 Ubuntu 24.04，导航栈要用
+`scripts/install_nav_stack.sh` 源码编译。实车若是 Ubuntu 20.04 上的官方 Noetic，
+安装 `ros-noetic-navigation` 即可，不必走那条源码路径。
+
+## 为什么漫游节点不用改写
 
 仓库刻意把「平台」与「策略」分开，两者只通过话题与一份参数文件往来：
 
@@ -29,78 +108,9 @@
 - 决策逻辑不读时钟、不读 TF、不依赖仿真：`navigator.plan` 是纯函数，输入是四个
   扇区距离、上一周期动作和已连续转向的秒数，因此仿真里跑通的行为在实车上可复现。
 
-## 一、挂上硬件驱动
+## 安全底线
 
-在 `ai_robot_nav/launch/real.launch` 标注的位置引入三个驱动，让它们对齐
-`nav_params.yaml` 里约定的话题：
-
-| 需要 | 话题 | 类型 |
-|------|------|------|
-| 激光雷达驱动 | `/scan` | `sensor_msgs/LaserScan` |
-| 相机驱动（可选，仅视觉层用） | `/my_camera/color/image_raw` | `sensor_msgs/Image` |
-| 底盘驱动 | 订阅 `/cmd_vel` | `geometry_msgs/Twist` |
-| 里程计（推荐） | `/odom` | `nav_msgs/Odometry` |
-
-话题名对不上时**改 yaml，不要改代码**。底盘若只接受 `TwistStamped`，把
-`safety_node` 的 `cmd_stamped` 改成 `true` 即可，无需改节点。
-
-硬件型号见 [platform.md](platform.md#实车硬件清单)。本仓库不含任何实车驱动。
-
-## 二、必须复核的三项参数
-
-这三项在仿真里的取值来自 Gazebo 模型，实车不一定相同，配错的后果都比较严重。
-
-### 1. `front_center_angle` —— 雷达安装角
-
-含义是「车体正前方对应的扫描角」。仿真中雷达绕 z 轴装反了 180°，所以是 `180.0`。
-
-**实车必须实测**，否则左右会整体反过来，机器人会朝障碍物转（这个 bug 真实发生过）。
-最简单的验证方法：把车停在空地上，正前方 1 m 放一个箱子，然后
-
-```bash
-rostopic echo /scan | head -40      # 看 angle_min / angle_increment
-```
-
-找出最小距离所在的下标 `i`，则 `front_center_angle = degrees(angle_min + i * angle_increment)`。
-装好后在空场地上跑一次，确认它总是朝更开阔的一侧转（日志里会打印
-`turning toward more open side (left …, right …)`，把数值和眼睛看到的比一下）。
-
-### 2. `stop_distance` / `clear_distance` —— 急停区
-
-仿真值 0.24 / 0.34 m 是从**雷达**算起的，而雷达装在 `base_link` 前方 0.166 m。
-实车需要按车头实际外廓 + 制动距离重新给值，并保证 `clear_distance > stop_distance`
-（否则迟滞失效，会在停/走边界抖动）。
-
-### 3. `escape_reverse_time` —— 脱困后退
-
-长时间转不出去时，策略会以最低速边退边转把车头从障碍上拽出来。**本车雷达只有
-前向 180° 视场，后方是完全的盲区。** 实车如果没有后向传感器或防撞条，请置 `0`
-关闭该动作；此时策略退化为纯原地转向（对差速+万向轮底盘通常够用）。
-
-## 三、速度标定顺序
-
-`nav_params.yaml` 里的速度按较小底盘留了保守余量。建议顺序：
-
-1. **先关视觉**：`roslaunch ai_robot_nav real.launch use_image:=false`，
-   排除 Ollama 带来的变量，确认纯激光行为正常。
-2. **原地测转向**：确认 `turn_speed` 下车辆能原地转、不打滑、不憋停。
-3. **测制动**：以 `cruise_speed` 直行并触发急停，量实际停车距离，反推 `stop_distance`。
-4. **再提速**：`cruise_speed`、`max_linear` 逐步上调，每次都重测第 3 步。
-5. **最后开视觉**：确认 Ollama 只会让车更慢（这条有单元测试保证，实车再核一遍）。
-
-## 四、里程计与轮距
-
-`platform.md` 记录了一处已知的参数不一致：URDF 关节几何给出轮距 0.3844 m，
-diff_drive 插件用的是 0.34 m。闭环反应式导航对此不敏感，所以仿真里没改；
-但实车里程计精度直接取决于真实轮距与轮径，上车前需要实测：
-
-- **轮距**：让车原地转整 10 圈，用 `/odom` 的偏航角误差反推；
-- **轮径**：让车直行 5 m（卷尺实测），与 `/odom` 位移比对。
-
-标定后把 `tjark_agv.controller.xacro` 的 `wheelSeparation` / `wheelDiameter`、
-URDF 关节位置、以及实车底盘固件三处统一。
-
-## 五、安全底线（不要绕过）
+不要绕过这些约束：
 
 - `safety_node` 是 `/cmd_vel` 的唯一发布者，也是最后一道闸。不要让别的节点直接发
   `/cmd_vel`。

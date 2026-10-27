@@ -5,7 +5,11 @@
 本仓库统一维护，不再依赖仓库外的任何路径。
 
 上层导航逻辑在 `src/ai_robot_nav`，与本包解耦：两者之间只通过话题与参数文件
-约定往来，换到实车时导航代码不需要改动。
+约定往来。实车先上激光漫游和急停，导航节点不用为换平台而改写。目标点导航是
+后面一步，见 [real_robot.md](real_robot.md)。
+
+尺寸与雷达模型以这里列出的实车数据为准。Gazebo 插件里和这组数不一致的地方，
+是待改的仿真参数，不是另一套实车规格。
 
 ---
 
@@ -15,6 +19,7 @@
 src/tjark_agv/
 ├── urdf/          车辆描述（见下）
 ├── meshes/        10 个 STL，共约 7.2 MB，base_body.STL 占 5.1 MB
+├── plugins/       Gazebo 行人碰撞插件 ActorCollisionsPlugin
 ├── worlds/        cafe.world —— 唯一仿真世界
 ├── models/        cafe、cafe_table —— cafe.world 引用的 Gazebo 模型
 └── launch/        description.launch（仿真+实车共用）、cafe_world.launch（仅仿真）
@@ -30,6 +35,11 @@ src/tjark_agv/
   （`GAZEBO_MODEL_DATABASE_URI` 已被置空，彻底关掉在线查询）
 
 `ground_plane` 由 Gazebo 11 自带，无需内置。
+
+cafe 里两名行人各有一个圆柱碰撞体，由 `libtjark_actor_collisions.so` 在加载时
+重新打开 actor 碰撞，供激光和车体检测。插件只在找到 Gazebo 时编译；实车没有
+Gazebo 时 CMake 会跳过它，不影响 URDF。动态库安装在 `lib/`，与
+`cafe_world.launch` 里的 `GAZEBO_PLUGIN_PATH` 一致。
 
 ---
 
@@ -106,18 +116,20 @@ R_base_laser = Rz(pi)
 
 ---
 
-## 车辆几何与已知的参数不一致
+## 车辆几何
 
-| 量 | URDF 关节几何 | diff_drive 插件 | CAD 零件名 |
-|----|---------------|-----------------|-----------|
-| 轮距 | ±0.192205 → **0.3844 m** | `wheelSeparation` **0.34** | — |
-| 轮径 | — | `wheelDiameter` **0.12** | 125 mm |
+实车尺寸以 URDF 关节和 CAD 件号为准：
 
-三者互不一致。仿真里 `odom` 的尺度由插件值决定，闭环反应式导航对此不敏感，因此
-**本仓库保留原值不动**，避免悄悄改变已跑通的仿真行为。但这是一笔明确的技术债：
+| 量 | 实车数据 | 仿真差速插件（尚未改） |
+|----|----------|------------------------|
+| 轮距 | 左右轮 `y = ±0.192205` → **0.3844 m** | `wheelSeparation` **0.34** |
+| 轮径 | 驱动轮 **125 mm**（125 × 38 × 18 mm） | `wheelDiameter` **0.12** |
 
-- 实车里程计精度直接取决于真实轮距与轮径，上车前必须实测并统一三处取值；
-- 标定方法见 [real_robot.md](real_robot.md)。
+仿真 `/odom` 仍按插件积分，直线大约差 4%，转弯大约差 11%。实现路径的第一步
+就是把插件改成 **0.3844** 和 **0.125**。不要把 URDF 关节改成 0.34 m 去凑插件。
+
+`amcl.yaml` 里四个 `odom_alpha*` 取 0.3，是为了盖住这个里程计偏差。插件改齐之后，
+目标点导航那一步再把它们调回大约 0.1。激光漫游不读里程计，不受这一项影响。
 
 ---
 

@@ -2,6 +2,8 @@
 <robot name="my_robot" xmlns:xacro="http://ros.org/wiki/xacro">
 
     <gazebo>
+        <!-- ODE 下与 actor 碰撞时须保持启用，否则行人可能穿模 -->
+        <allow_auto_disable>false</allow_auto_disable>
         <plugin name="differential_drive_controller" 
                 filename="libgazebo_ros_diff_drive.so">
             <rosDebugLevel>Debug</rosDebugLevel>

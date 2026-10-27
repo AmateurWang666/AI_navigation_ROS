@@ -6,6 +6,17 @@
 # 挪到实车时优先复核带「实车」字样的几项；其余取值按较小底盘留了保守余量，
 # 逐项重标定的顺序见 docs/real_robot.md。
 
+# 激光预处理：漫游与安全层共用。细立柱（如 4.2 cm 桌腿）在稀疏雷达下易漏检；
+# 仅在近距离展宽 + 短记忆，并随时间「消退」，避免空旷地带长期警戒、速度过慢。
+scan_processing:
+  inflation_radius: 0.10          # 米，近距离点状回波的角度展宽半径
+  inflation_max_range: 1.8        # 米，超过此距离的回波不展宽（侧方远桌不影响前方）
+  persistence_sec: 0.25           # 秒，漫游层：稀疏命中的记忆时长
+  safety_persistence_sec: 0.18    # 秒，安全层更短，减少贴脸后多余急停拖尾
+  safety_persistence_release_distance: 0.40  # 米，安全层记忆消退阈值（≈ clear_distance）
+  persistence_decay_rate: 0.35    # m/s，记忆距离随时间增大（模拟已绕过障碍）
+  persistence_release_distance: 1.10  # 米，漫游层记忆超过此值即释放（应 > forward_clearance）
+
 ai_nav_node:
   scan_topic: "/scan"
   image_topic: "/my_camera/color/image_raw"
@@ -39,6 +50,8 @@ ai_nav_node:
   # 【实车】雷达安装角不同就必须改这一项，否则左右会整体反过来，机器人朝障碍转。
   front_center_angle: 180.0
   front_half_angle: 30.0
+  # 直行/转向决策用的窄前方扇区。宽扇区会把侧墙算进 ahead，贴墙时误报 0.55 m。
+  path_half_angle: 12.0
   side_center_angle: 90.0
   side_half_angle: 30.0
 

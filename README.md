@@ -1,25 +1,42 @@
 # AI Navigation ROS
 
-面向 **tjark_agv** 差速小车的 ROS 1 自主导航栈：**激光雷达负责确定性运动决策**，
+面向 **tjark_agv** 差速小车的 ROS 1 导航栈：**激光雷达负责确定性运动决策**，
 **Ollama 视觉模型（LLaVA）仅作安全收敛层**——可以减速或停车，不会替雷达选路，
 也不会让机器人加速冲向障碍。
 
-支持两种运行方式，共用同一条指令链路与同一道安全闸：
-
-| 方式 | 说明 |
-|------|------|
-| **目标点导航** | 给定地图与目的地，自动规划路径并抵达（`move_base` + `amcl`） |
-| **反应式漫游** | 无地图、无目标点，纯激光避障游走（本项目最初的形态） |
-
-地图用 **ROS 标准 map_server 格式**，可换成任何环境的地图——用法见
-[docs/mapping.md](docs/mapping.md)。
-
-项目处于早期阶段：**当前只在仿真中运行，后续挪到实车调试**。因此仓库刻意把
-「平台」与「策略」分开，仿真与实车共用同一份 URDF、同一份参数、同一套导航节点，
-迁移时不需要改导航代码（清单见 [docs/real_robot.md](docs/real_robot.md)）。
-
 > 仓库名里的 "ROS" 指 **ROS 1 Noetic + Gazebo Classic 11**（早期原型基于 ROS 2，
 > 已迁移，以对齐 tjark_agv 实车平台）。
+
+## 最终目标与实现路径
+
+**最终目标：** 这台实车在 ROS 1 上先自己完成激光漫游和急停。没有地图、没有目标点，
+车靠 `/scan` 决定走和转，`safety_node` 是 `/cmd_vel` 的唯一发布者。目标点导航
+（地图、`amcl`、`move_base`）留到实车漫游验收之后。
+
+尺寸和雷达模型以已给出的实车数据为准，不另做一套仿真规格：
+
+| 量 | 实车数据 |
+|----|----------|
+| 轮距 | **0.3844 m**（URDF 左右轮 `y = ±0.192205`） |
+| 轮径 | **125 mm** |
+| 雷达 | 前向 **180°**（扫描角 90°–270°），360 线，10 Hz，量程 0.12–20 m |
+| 雷达安装 | 相对 `base_link` 绕 z 轴 180°，在其前方 **0.166 m**；`front_center_angle: 180` |
+
+实现分成四步。当前停在仿真里，第一步还没做：差速插件仍是轮距 0.34 m、轮径 0.12 m。
+
+1. **仿真对齐实车尺寸。** 把 `tjark_agv.controller.xacro` 的 `wheelSeparation` / `wheelDiameter` 改成 0.3844 和 0.125。URDF 关节是实车几何，不要改去迁就插件。
+2. **在 cafe 里验收激光漫游和急停。** 纯激光跑通：前方净空就直行，近障就转向，贴脸急停，通路恢复后继续走。
+3. **实车挂底盘和雷达，空场标定。** `real.launch` 里接入订阅 `/cmd_vel` 的底盘和发布 `/scan` 的雷达。相机不是这一步的条件。
+4. **再上地图和目标点导航。** 用法见 [docs/mapping.md](docs/mapping.md)。实车入口现在不包含这一层。
+
+细节和上车清单在 [docs/real_robot.md](docs/real_robot.md)，车辆数据在 [docs/platform.md](docs/platform.md)。
+
+仓库里已经有两套能力，共用同一条指令链路和同一道安全闸。实车按上面的顺序用，不是两套一起上车：
+
+| 方式 | 现在何处可用 | 实车顺序 |
+|------|----------------|----------|
+| **反应式漫游** | 仿真与 `real.launch` 的节点都有；实车驱动还没挂 | **先上车** |
+| **目标点导航** | `sim.launch` 默认会拉起 `move_base` | **漫游验收之后**，`real.launch` 尚未包含 |
 
 ---
 
@@ -85,7 +102,7 @@
 |------|------|
 | `navigator.py` | 纯函数反应式策略：净空迟滞、转向死区、方向锁存、脱困 |
 | `command_mux.py` | 纯函数指令仲裁：目标点优先、过期即停 |
-| `scan_utils.py` | 激光扇区最小距离，按雷达安装角推算四个方向 |
+| `scan_utils.py` | 激光扇区最小距离。展宽只作用于扇区内部的回波；跨帧记忆不覆盖盲区（`None`） |
 | `map_utils.py` | 用户地图的解析与校验 |
 | `goals.py` | 目的地表解析，名字与坐标两种输入 |
 | `occupancy_grid.py` | 对数几率占据栅格，含 PGM/YAML 导出 |
@@ -105,7 +122,7 @@
 | 语言 | Python 3 + rospy |
 | 视觉 | Ollama + `llava:7b`（可选，未启动时自动降级纯激光） |
 | 导航 | `move_base` / `amcl` / `map_server`（源码编译，见下） |
-| 测试 | pytest（155 项，不需要 Gazebo 或 Ollama） |
+| 测试 | pytest（`src/ai_robot_nav/test/`，不需要 Gazebo 或 Ollama） |
 
 **首次安装（WSL，只需一次）：**
 
@@ -132,7 +149,9 @@ WSL 侧目录与 Windows 仓库名对齐（源码在 `/mnt/c/.../ROS_AI_Robot_Wo
 
 ---
 
-## 地图与导航安全（必读）
+## 地图与导航安全（第四步再用）
+
+这一节只在使用目标点导航时需要。当前实车目标不依赖它。`sim.launch` 默认仍会加载 cafe 地图和 `move_base`，所以仿真里发目标点会走到这些限制。
 
 目标点导航能否成功，**不只看 move_base 有没有装好，更取决于地图是否完整**。
 这是本项目最容易踩坑、也最容易被误判为「规划器坏了」的地方。
@@ -189,7 +208,9 @@ bash scripts/sim.sh --map /path/to/my_map.yaml
 
 ## 快速开始
 
-### 一条命令跑全程（日常推荐）
+### 一条命令跑仿真（日常推荐）
+
+`scripts/sim.sh` 走的是 cafe 仿真，默认同时有漫游和目标点导航。实车四步路径见上文，不由这条命令完成。
 
 ```bash
 cd /mnt/c/Users/ROG/Desktop/ROS_AI_Robot_Workspace
@@ -279,7 +300,7 @@ ROS_AI_Robot_Workspace/
 ├── docs/
 │   ├── platform.md            # tjark_agv 车辆与 cafe 仿真环境说明、硬件清单
 │   ├── mapping.md             # 地图格式、建图、目标点导航、规划器选型
-│   └── real_robot.md          # 挪到实车的清单与标定顺序
+│   └── real_robot.md          # 最终目标、四步路径、实车标定
 ├── scripts/
 │   ├── sim.sh                 # 仿真 + 导航一键脚本
 │   ├── sync_ws.sh             # 同步 src/ 到 ~/ROS_AI_Robot_Workspace_ws 并 catkin_make
@@ -301,16 +322,17 @@ ROS_AI_Robot_Workspace/
 │   │   ├── cafe.yaml / cafe.pgm         # 默认地图
 │   │   └── cafe.destinations.yaml       # 命名目的地
 │   ├── launch/
-│   │   ├── ai_nav.launch      # 导航层 + 仲裁（平台无关）
-│   │   ├── navigation.launch  # map_server + amcl + move_base
+│   │   ├── ai_nav.launch      # 漫游 + 仲裁 + 急停（仿真与实车共用）
+│   │   ├── navigation.launch  # map_server + amcl + move_base（第四步）
 │   │   ├── mapping.launch     # 为新环境建图
-│   │   ├── sim.launch         # cafe 仿真 + 导航
-│   │   └── real.launch        # 实车入口（驱动挂载点）
+│   │   ├── sim.launch         # cafe 仿真；默认同时拉起漫游和目标点导航
+│   │   └── real.launch        # 实车入口：只有描述和漫游层，驱动槽仍空着
 │   ├── scripts/               # ROS 节点入口
 │   └── test/                  # 单元测试
 └── src/tjark_agv/
     ├── urdf/ meshes/          # 车辆描述（仿真与实车共用）
-    ├── worlds/ models/        # cafe 场景及其模型（离线可用）
+    ├── plugins/               # Gazebo 行人碰撞插件（没有 Gazebo 时不编译）
+    ├── worlds/ models/        # cafe 场景及其模型（离线可用；行人带圆柱碰撞体）
     └── launch/
         ├── description.launch # URDF + TF（仿真与实车共用）
         └── cafe_world.launch  # Gazebo + cafe + spawn（仅仿真）
@@ -344,7 +366,7 @@ ROS_AI_Robot_Workspace/
 | `escape_reverse_time` | `9.0` | 再超过此秒数改为边退边转脱困；`0` 关闭 |
 | `stop_distance` | `0.24` | safety 急停距离（从雷达算起） |
 
-坐标约定、车辆几何与已知的参数不一致见 [docs/platform.md](docs/platform.md)。
+雷达坐标和「插件轮距尚未改成 0.3844 m」见 [docs/platform.md](docs/platform.md)。
 
 ---
 

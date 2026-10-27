@@ -21,3 +21,12 @@ def param_float(name: str, default: float) -> float:
 
 def param_int(name: str, default: int) -> int:
     return int(param(name, default))
+
+
+def global_param(name: str, default):
+    """读取全局参数（nav_params.yaml 根级键，如 /scan_processing/...）。"""
+    return rospy.get_param(name, default)
+
+
+def global_param_float(name: str, default: float) -> float:
+    return float(global_param(name, default))
