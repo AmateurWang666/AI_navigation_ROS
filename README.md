@@ -7,36 +7,7 @@
 > 仓库名里的 "ROS" 指 **ROS 1 Noetic + Gazebo Classic 11**（早期原型基于 ROS 2，
 > 已迁移，以对齐 tjark_agv 实车平台）。
 
-## 最终目标与实现路径
-
-**最终目标：** 这台实车在 ROS 1 上先自己完成激光漫游和急停。没有地图、没有目标点，
-车靠 `/scan` 决定走和转，`safety_node` 是 `/cmd_vel` 的唯一发布者。目标点导航
-（地图、`amcl`、`move_base`）留到实车漫游验收之后。
-
-尺寸和雷达模型以已给出的实车数据为准，不另做一套仿真规格：
-
-| 量 | 实车数据 |
-|----|----------|
-| 轮距 | **0.3844 m**（URDF 左右轮 `y = ±0.192205`） |
-| 轮径 | **125 mm** |
-| 雷达 | 前向 **180°**（扫描角 90°–270°），360 线，10 Hz，量程 0.12–20 m |
-| 雷达安装 | 相对 `base_link` 绕 z 轴 180°，在其前方 **0.166 m**；`front_center_angle: 180` |
-
-实现分成四步。当前停在仿真里，第一步还没做：差速插件仍是轮距 0.34 m、轮径 0.12 m。
-
-1. **仿真对齐实车尺寸。** 把 `tjark_agv.controller.xacro` 的 `wheelSeparation` / `wheelDiameter` 改成 0.3844 和 0.125。URDF 关节是实车几何，不要改去迁就插件。
-2. **在 cafe 里验收激光漫游和急停。** 纯激光跑通：前方净空就直行，近障就转向，贴脸急停，通路恢复后继续走。
-3. **实车挂底盘和雷达，空场标定。** `real.launch` 里接入订阅 `/cmd_vel` 的底盘和发布 `/scan` 的雷达。相机不是这一步的条件。
-4. **再上地图和目标点导航。** 用法见 [docs/mapping.md](docs/mapping.md)。实车入口现在不包含这一层。
-
-细节和上车清单在 [docs/real_robot.md](docs/real_robot.md)，车辆数据在 [docs/platform.md](docs/platform.md)。
-
-仓库里已经有两套能力，共用同一条指令链路和同一道安全闸。实车按上面的顺序用，不是两套一起上车：
-
-| 方式 | 现在何处可用 | 实车顺序 |
-|------|----------------|----------|
-| **反应式漫游** | 仿真与 `real.launch` 的节点都有；实车驱动还没挂 | **先上车** |
-| **目标点导航** | `sim.launch` 默认会拉起 `move_base` | **漫游验收之后**，`real.launch` 尚未包含 |
+当前进度、还没做的事、以及建议的先后顺序写在 [docs/roadmap.md](docs/roadmap.md)。
 
 ---
 
@@ -149,9 +120,10 @@ WSL 侧目录与 Windows 仓库名对齐（源码在 `/mnt/c/.../ROS_AI_Robot_Wo
 
 ---
 
-## 地图与导航安全（第四步再用）
+## 地图与导航安全
 
-这一节只在使用目标点导航时需要。当前实车目标不依赖它。`sim.launch` 默认仍会加载 cafe 地图和 `move_base`，所以仿真里发目标点会走到这些限制。
+`sim.launch` 默认会加载 cafe 地图和 `move_base`，所以仿真里发目标点会走到这些限制。
+换地图、建图和规划器选型见 [docs/mapping.md](docs/mapping.md)。
 
 目标点导航能否成功，**不只看 move_base 有没有装好，更取决于地图是否完整**。
 这是本项目最容易踩坑、也最容易被误判为「规划器坏了」的地方。
@@ -210,7 +182,7 @@ bash scripts/sim.sh --map /path/to/my_map.yaml
 
 ### 一条命令跑仿真（日常推荐）
 
-`scripts/sim.sh` 走的是 cafe 仿真，默认同时有漫游和目标点导航。实车四步路径见上文，不由这条命令完成。
+`scripts/sim.sh` 走的是 cafe 仿真，默认同时有漫游和目标点导航。
 
 ```bash
 cd /mnt/c/Users/ROG/Desktop/ROS_AI_Robot_Workspace
@@ -292,51 +264,178 @@ wsl -d Ubuntu bash ./scripts/run_tests.sh
 
 ---
 
-## 目录结构
+## 文件说明
 
-```
-ROS_AI_Robot_Workspace/
-├── README.md
-├── docs/
-│   ├── platform.md            # tjark_agv 车辆与 cafe 仿真环境说明、硬件清单
-│   ├── mapping.md             # 地图格式、建图、目标点导航、规划器选型
-│   └── real_robot.md          # 最终目标、四步路径、实车标定
-├── scripts/
-│   ├── sim.sh                 # 仿真 + 导航一键脚本
-│   ├── sync_ws.sh             # 同步 src/ 到 ~/ROS_AI_Robot_Workspace_ws 并 catkin_make
-│   ├── wsl_paths.sh           # WSL 路径与 Windows 仓库目录名对齐
-│   ├── align_wsl_layout.sh    # 迁移旧 ~/ros_ws 命名、清理冗余目录
-│   ├── install_ros_noetic.sh  # WSL 首次安装
-│   ├── install_nav_stack.sh   # 源码编译 move_base/amcl/map_server
-│   ├── run_tests.sh           # pytest
-│   └── ros_env.sh             # 公共环境变量（含导航栈 overlay）
-├── src/ai_robot_nav/
-│   ├── ai_robot_nav/          # Python 包（节点逻辑）
-│   ├── config/
-│   │   ├── nav_params.yaml        # 唯一参数文件，仿真与实车共用
-│   │   ├── move_base.yaml         # 全局/局部规划器选型与参数
-│   │   ├── amcl.yaml              # 定位参数
-│   │   ├── costmap_*.yaml         # 代价地图（公共/全局/局部）
-│   │   └── rosconsole_sim.config  # 仿真日志降噪
-│   ├── maps/
-│   │   ├── cafe.yaml / cafe.pgm         # 默认地图
-│   │   └── cafe.destinations.yaml       # 命名目的地
-│   ├── launch/
-│   │   ├── ai_nav.launch      # 漫游 + 仲裁 + 急停（仿真与实车共用）
-│   │   ├── navigation.launch  # map_server + amcl + move_base（第四步）
-│   │   ├── mapping.launch     # 为新环境建图
-│   │   ├── sim.launch         # cafe 仿真；默认同时拉起漫游和目标点导航
-│   │   └── real.launch        # 实车入口：只有描述和漫游层，驱动槽仍空着
-│   ├── scripts/               # ROS 节点入口
-│   └── test/                  # 单元测试
-└── src/tjark_agv/
-    ├── urdf/ meshes/          # 车辆描述（仿真与实车共用）
-    ├── plugins/               # Gazebo 行人碰撞插件（没有 Gazebo 时不编译）
-    ├── worlds/ models/        # cafe 场景及其模型（离线可用；行人带圆柱碰撞体）
-    └── launch/
-        ├── description.launch # URDF + TF（仿真与实车共用）
-        └── cafe_world.launch  # Gazebo + cafe + spawn（仅仿真）
-```
+两个 ROS 包：`src/tjark_agv` 是车和仿真世界，`src/ai_robot_nav` 是导航与安全。
+网格、贴图和 `cafe.pgm` 是二进制资产，导航代码不解析贴图文件名。
+
+### 仓库根与文档
+
+| 文件 | 作用 |
+|------|------|
+| `README.md` | 本说明：架构、怎么跑、每个文件做什么 |
+| `docs/platform.md` | 车辆几何、激光坐标、cafe 世界、硬件清单 |
+| `docs/mapping.md` | 地图格式、建图、目标点导航、规划器选型 |
+| `docs/real_robot.md` | 从仿真接到实车时的操作和安全底线 |
+| `docs/roadmap.md` | 当前进度、未完成项、建议顺序 |
+| `.gitignore` | 忽略 catkin/colcon 构建目录、Python 缓存和编辑器文件 |
+| `.gitattributes` | 源码强制 LF；网格、贴图、PGM 按二进制保存，避免检出时被插进回车 |
+
+### `scripts/`
+
+在 WSL 里跑。Windows 上编辑源码，这些脚本负责安装、同步和启动。
+
+| 文件 | 作用 |
+|------|------|
+| `sim.sh` | cafe 仿真加导航的日常入口：headless / GUI、纯激光、换地图、只起仿真或只起导航、停止 |
+| `sync_ws.sh` | 把 `src/` 复制到 `~/ROS_AI_Robot_Workspace_ws` 再构建；`/mnt/c` 上直接 `catkin_make` 太慢 |
+| `wsl_paths.sh` | 定义源码目录、catkin 工作空间、导航栈 overlay 的路径，被其它脚本 source |
+| `ros_env.sh` | source Noetic、导航栈 overlay 和本仓库工作空间，并设置 Gazebo 模型路径 |
+| `install_ros_noetic.sh` | 在 Ubuntu 24.04 WSL 上安装 ROS Noetic 与 Gazebo Classic，并做首次构建 |
+| `install_nav_stack.sh` | 源码编译 `move_base`、`amcl`、`map_server` 等到独立的 nav 工作空间 |
+| `align_wsl_layout.sh` | 把旧的 `~/ros_ws` 目录名迁到当前命名，并清理过期的 ROS 2 工作空间 |
+| `run_tests.sh` | 跑 `ai_robot_nav` 的 pytest，不需要 Gazebo 或 Ollama |
+
+### `src/ai_robot_nav/` 包描述
+
+| 文件 | 作用 |
+|------|------|
+| `package.xml` | 包元数据与依赖。`move_base_msgs` 只作运行依赖，避免导航栈没装好时本包编译失败 |
+| `CMakeLists.txt` | catkin 安装 Python 节点、launch、config 和 maps |
+| `setup.py` | 把 `ai_robot_nav` 注册成可导入的 Python 包 |
+
+### `src/ai_robot_nav/ai_robot_nav/` 逻辑
+
+节点文件带 `rospy`；`navigator`、`command_mux`、`scan_utils`、`llm_client`、`motion`、`map_utils`、`goals`、`occupancy_grid` 可以脱离 ROS 图做单元测试。
+
+| 文件 | 作用 |
+|------|------|
+| `__init__.py` | 包说明 |
+| `ai_nav_node.py` | 读激光和可选相机，调用 `plan()`，发布 `/explore_cmd_vel` |
+| `navigator.py` | 纯函数策略：净空迟滞、转向死区、方向锁存、脱困。视觉只能让它更慢或改平局 |
+| `nav_mux_node.py` | 订阅漫游速度和 `move_base` 速度，发布 `/ai_cmd_vel` |
+| `command_mux.py` | 仲裁规则：有目标点时用导航速度，指令过期就停车 |
+| `safety_node.py` | 激光急停、速度限幅、上游超时零速；`/cmd_vel` 的唯一发布者 |
+| `motion.py` | 线速度、角速度限幅，AI 节点和安全节点共用 |
+| `scan_utils.py` | 按 `front_center_angle` 取前/左/右/后扇区距离；近距离展宽和短时记忆 |
+| `llm_client.py` | 向 Ollama 要风险等级和方向偏好，解析失败就当这次没有视觉 |
+| `ros_params.py` | 从参数服务器读数字、布尔和全局参数 |
+| `log_throttle.py` | 按时间间隔压缩重复日志 |
+| `lifecycle.py` | 安装 SIGINT/SIGTERM，让节点能干净退出 |
+| `map_manager_node.py` | 启动前校验地图，加载旁边的命名目的地，打印哪些目标不可达 |
+| `map_utils.py` | 解析 map_server 的 yaml/图片，检查覆盖率和目标是否走得通 |
+| `goals.py` | 把目的地名字或坐标解析成同一个位姿 |
+| `send_goal.py` | 命令行下发目标并等到抵达、失败或被打断 |
+| `mapper_node.py` | 边走边建占据栅格，并用服务把地图存成 yaml + pgm |
+| `occupancy_grid.py` | 对数几率更新、射线、PGM/YAML 导出 |
+
+### `src/ai_robot_nav/scripts/` 节点入口
+
+每个文件只调用同名模块的 `main()`，给 `rosrun` / `roslaunch` 用。
+
+| 文件 | 作用 |
+|------|------|
+| `ai_nav_node` | 启动 `ai_nav_node.py` |
+| `safety_node` | 启动 `safety_node.py` |
+| `nav_mux_node` | 启动 `nav_mux_node.py` |
+| `map_manager_node` | 启动 `map_manager_node.py` |
+| `mapper_node` | 启动 `mapper_node.py` |
+| `send_goal` | 启动 `send_goal.py` |
+
+### `src/ai_robot_nav/launch/`
+
+| 文件 | 作用 |
+|------|------|
+| `sim.launch` | cafe 仿真加导航层；默认同开漫游和目标点导航 |
+| `real.launch` | 实车入口：车辆描述 + `ai_nav.launch`，文件里留有底盘、雷达、相机驱动的挂载位置 |
+| `ai_nav.launch` | 漫游、仲裁、急停。不含仿真或硬件，两边共用 |
+| `navigation.launch` | `map_server` + `amcl` + `move_base`，输出重映射到 `/nav_cmd_vel` |
+| `mapping.launch` | 在仿真或实车里用漫游层走一圈，配合 `mapper_node` 建图 |
+
+### `src/ai_robot_nav/config/`
+
+| 文件 | 作用 |
+|------|------|
+| `nav_params.yaml` | 唯一的导航与安全参数，仿真和实车共用 |
+| `move_base.yaml` | 全局规划用 A*（`global_planner`），局部用 DWA |
+| `amcl.yaml` | 粒子滤波定位；针对前向 180° 雷达放宽了粒子和噪声 |
+| `costmap_common.yaml` | 车体半径和障碍膨胀，全局、局部代价地图都加载 |
+| `costmap_global.yaml` | 整张地图上的静态代价，坐标系是 `map` |
+| `costmap_local.yaml` | 跟着车走的滚动窗口，坐标系是 `odom`，供局部避障 |
+| `rosconsole_sim.config` | 仿真时把 Gazebo 和相机日志降到 WARN |
+
+### `src/ai_robot_nav/maps/`
+
+| 文件 | 作用 |
+|------|------|
+| `cafe.yaml` | 默认地图描述：分辨率 0.05 m、原点、占据阈值 |
+| `cafe.pgm` | 对应的栅格图 |
+| `cafe.destinations.yaml` | 这张图上的命名目的地，`send_goal hall` 读这里 |
+
+### `src/ai_robot_nav/test/`
+
+pytest，不启动 ROS 图。
+
+| 文件 | 作用 |
+|------|------|
+| `test_navigator.py` | 策略由激光决定；视觉不能加速，也不能在明显更空的一侧选错方向 |
+| `test_scan_utils.py` | 扇区、安装角、展宽、短时记忆；盲区必须保持为盲区 |
+| `test_command_mux.py` | 目标点独占控制权，过期指令变成停车 |
+| `test_llm_client.py` | 模型输出当不可信输入，垃圾文本要静默失败 |
+| `test_map_utils.py` | 坏地图在启动前被拒绝，并指出该改哪一项 |
+| `test_map_coverage.py` | 覆盖率统计，以及未知格子是否挡住路径 |
+| `test_goals.py` | 名字和坐标两种输入都得到同一个位姿 |
+| `test_occupancy_grid.py` | 射线、占据更新、PGM 导出 |
+
+### `src/tjark_agv/` 车辆与仿真世界
+
+| 文件 | 作用 |
+|------|------|
+| `package.xml` | 包元数据。导出 Gazebo 模型路径；没有 Gazebo 时仍可只用 URDF |
+| `CMakeLists.txt` | 安装描述文件；找到 Gazebo 时才编译行人碰撞插件 |
+| `launch/description.launch` | 把 xacro 放到 `robot_description` 并发布 TF。仿真和实车共用 |
+| `launch/cafe_world.launch` | 启动 Gazebo、加载 cafe、把车放到世界里。只用于仿真 |
+| `worlds/cafe.world` | 唯一的仿真世界：灯光、地面、cafe 模型和两名行人 |
+| `plugins/ActorCollisionsPlugin.hh` | 插件声明：重新打开 Gazebo actor 的碰撞 |
+| `plugins/ActorCollisionsPlugin.cc` | 插件实现。行人默认为无碰撞，不处理的话激光和车会穿过去 |
+
+URDF 由 `urdf/tjark_agv.xacro` 串起来。`<gazebo>` 标签只有 gzserver 读，实车驱动会忽略。
+
+| 文件 | 作用 |
+|------|------|
+| `urdf/tjark_agv.xacro` | 描述入口，按顺序引入下面五个文件 |
+| `urdf/tjark_agv.urdf` | SolidWorks 导出的连杆、关节和 STL 引用 |
+| `urdf/tjark_agv.sensor.xacro` | Gazebo 激光与深度相机插件 |
+| `urdf/tjark_agv.motor.xacro` | 左右驱动轮的 `SimpleTransmission` |
+| `urdf/tjark_agv.controller.xacro` | `libgazebo_ros_diff_drive.so`：订阅 `/cmd_vel`，发布 `/odom` |
+| `urdf/tjark_agv.controller.yaml` | `gazebo_ros_control` 的轮速 PID。当前底盘不走这条通路 |
+| `urdf/tjark_agv.color.xacro` | Gazebo 材质和摩擦 |
+
+`meshes/` 是车体网格，由 URDF 引用：
+
+| 文件 | 作用 |
+|------|------|
+| `meshes/base_link.STL` | 根连杆网格 |
+| `meshes/base_body.STL` | 车体外壳 |
+| `meshes/left_wheel.STL` / `right_wheel.STL` | 两个驱动轮 |
+| `meshes/LF_link.STL` / `LB_link.STL` / `RF_link.STL` / `RB_link.STL` | 四个被动万向轮 |
+| `meshes/laser_link.STL` | 雷达外壳 |
+| `meshes/camera_link.STL` | 相机外壳 |
+
+`models/` 是 cafe 世界引用的 Gazebo 模型，克隆后可离线加载。
+
+| 文件 | 作用 |
+|------|------|
+| `models/cafe/model.config` | 把模型名 Cafe 指到 `model.sdf` |
+| `models/cafe/model.sdf` | 咖啡厅场景的模型描述 |
+| `models/cafe/meshes/cafe.dae` | 场景网格 |
+| `models/cafe/materials/textures/__auto_*.jpg` | `cafe.dae` 用的贴图（`__auto_2` 到 `__auto_37` 中的 15 张） |
+| `models/cafe_table/model.config` | 桌子模型入口 |
+| `models/cafe_table/model.sdf` | 桌子的现行 SDF |
+| `models/cafe_table/model-1_4.sdf` | 同一张桌子的 SDF 1.4 描述，含桌面和桌腿碰撞盒 |
+| `models/cafe_table/meshes/cafe_table.dae` | 桌子网格 |
+| `models/cafe_table/materials/textures/Maple.jpg` | 桌面木纹 |
+| `models/cafe_table/materials/textures/Wood_Floor_Dark.jpg` | 深色木地板贴图 |
 
 ---
 
@@ -366,7 +465,7 @@ ROS_AI_Robot_Workspace/
 | `escape_reverse_time` | `9.0` | 再超过此秒数改为边退边转脱困；`0` 关闭 |
 | `stop_distance` | `0.24` | safety 急停距离（从雷达算起） |
 
-雷达坐标和「插件轮距尚未改成 0.3844 m」见 [docs/platform.md](docs/platform.md)。
+雷达坐标与车辆几何见 [docs/platform.md](docs/platform.md)。
 
 ---
 

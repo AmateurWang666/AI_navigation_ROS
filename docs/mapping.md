@@ -1,10 +1,9 @@
 # 地图与目标点导航
 
-这是实现路径的**第四步**。实车当前要先完成激光漫游和急停，见
-[real_robot.md](real_robot.md)。本文不改变这个顺序。
+进度和推荐顺序见 [roadmap.md](roadmap.md)。
 
-`sim.launch` 默认仍会加载地图和 `move_base`，所以下面的步骤现在就能在 cafe
-仿真里用。`real.launch` 还没有包含 `navigation.launch`。
+`sim.launch` 默认会加载地图和 `move_base`，所以下面的步骤现在就能在 cafe
+仿真里用。
 
 本文说明两件事：**怎么换成你自己的地图**，以及**怎么让机器人自动去指定目的地**。
 
