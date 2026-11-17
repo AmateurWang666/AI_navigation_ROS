@@ -19,7 +19,7 @@ from ai_robot_nav.log_throttle import LogThrottle
 from ai_robot_nav.motion import clamp
 from ai_robot_nav.navigator import TURNING_ACTIONS, NavConfig, plan
 from ai_robot_nav.ros_params import (
-    global_param_float, param, param_bool, param_float, param_int,
+    global_param_float, load_footprint, param, param_bool, param_float, param_int,
 )
 from ai_robot_nav.scan_utils import (
     SectorDistanceFilter, describe_environment, format_distance,
@@ -113,6 +113,15 @@ class AINavNode:
             f'AI nav node up: model={self._ollama_model} '
             f'period={self._period:.1f}s vision={"on" if self._use_image else "off"} '
             f'-> {self._cmd_topic}')
+        if self._footprint is None:
+            rospy.logwarn(
+                '/robot_footprint/radius is not set; "ahead" falls back to the narrow '
+                'path cone, which cannot see walls converging at a shallow angle.')
+        else:
+            rospy.loginfo(
+                f'Forward clearance swept by a {self._footprint.radius:.3f} m body '
+                f'(+{self._footprint.margin:.2f} m margin), laser '
+                f'{self._footprint.laser_x:.3f} m ahead of base_link.')
 
     def _load_parameters(self):
         self._scan_topic = param('scan_topic', '/scan')
@@ -153,6 +162,7 @@ class AINavNode:
             0.0, global_param_float('/scan_processing/persistence_decay_rate', 0.35))
         self._scan_persistence_release = max(
             0.0, global_param_float('/scan_processing/persistence_release_distance', 1.10))
+        self._footprint = load_footprint(param_float('footprint_margin', 0.05))
 
         forward_clearance = param_float('forward_clearance', 0.6)
         turn_clearance = param_float('turn_clearance', 0.5)
@@ -256,7 +266,8 @@ class AINavNode:
             inflation_radius=self._scan_inflation_radius,
             inflation_max_range=self._scan_inflation_max_range,
             sector_filter=self._sector_filter,
-            filter_time=now.to_sec())
+            filter_time=now.to_sec(),
+            footprint=self._footprint)
         assessment = self._fresh_assessment(now)
 
         if assessment is None and not self._lidar_only_fallback:

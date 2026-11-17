@@ -9,9 +9,11 @@ from sensor_msgs.msg import LaserScan
 from ai_robot_nav.lifecycle import install_shutdown_signals
 from ai_robot_nav.log_throttle import LogThrottle
 from ai_robot_nav.motion import clamp, clamp_twist
-from ai_robot_nav.ros_params import global_param_float, param, param_bool, param_float
+from ai_robot_nav.ros_params import (
+    global_param_float, load_footprint, param, param_bool, param_float,
+)
 from ai_robot_nav.scan_utils import (
-    SectorDistanceFilter, sector_min_distance_inflated,
+    SectorDistanceFilter, forward_free_distance, sector_min_distance_inflated,
 )
 
 
@@ -45,10 +47,13 @@ class SafetyNode:
             rospy.logwarn(
                 'passthrough_mode is on: this node will NOT publish. '
                 'The robot is unguarded - intended for manual teleoperation only.')
+        measured = ('body travel' if self._footprint is not None
+                    else 'laser range in the front cone')
         rospy.loginfo(
             f'Safety node guarding {self._cmd_topic} at {self._control_frequency:.0f} Hz '
             f'as {output_type.__name__} '
-            f'(stop <{self._stop_distance:.2f}m, resume >{self._clear_distance:.2f}m).')
+            f'(stop <{self._stop_distance:.2f}m, resume >{self._clear_distance:.2f}m '
+            f'of {measured}).')
 
     def _load_parameters(self):
         self._scan_topic = param('scan_topic', '/scan')
@@ -68,6 +73,7 @@ class SafetyNode:
         self._allow_reverse = param_bool('allow_reverse_in_emergency', True)
         self._allow_rotate = param_bool('allow_rotate_in_emergency', True)
         self._passthrough = param_bool('passthrough_mode', False)
+        self._footprint = load_footprint(param_float('footprint_margin', 0.02))
         self._scan_inflation_radius = max(
             0.0, global_param_float('/scan_processing/inflation_radius', 0.10))
         self._scan_inflation_max_range = max(
@@ -91,9 +97,13 @@ class SafetyNode:
         now = rospy.Time.now()
         self._scan_stamp = now
 
-        front = sector_min_distance_inflated(
-            msg, self._front_center_angle, self._front_half_angle,
-            self._scan_inflation_radius, self._scan_inflation_max_range)
+        if self._footprint is not None:
+            front = forward_free_distance(
+                msg, self._front_center_angle, self._footprint, self._front_half_angle)
+        else:
+            front = sector_min_distance_inflated(
+                msg, self._front_center_angle, self._front_half_angle,
+                self._scan_inflation_radius, self._scan_inflation_max_range)
         front, _, _, _ = self._sector_filter.apply(
             front, None, None, None, now.to_sec(), msg.range_max)
         was_emergency = self._emergency
@@ -149,13 +159,17 @@ class SafetyNode:
         if self._passthrough:
             return
 
+        message = command
         if self._cmd_stamped:
-            stamped = TwistStamped()
-            stamped.header.stamp = rospy.Time.now()
-            stamped.twist = command
-            self._cmd_publisher.publish(stamped)
-        else:
-            self._cmd_publisher.publish(command)
+            message = TwistStamped()
+            message.header.stamp = rospy.Time.now()
+            message.twist = command
+        try:
+            self._cmd_publisher.publish(message)
+        except rospy.ROSException:
+            # Ctrl+C 时定时器线程可能在话题关闭后还跑一拍。
+            if not rospy.is_shutdown():
+                raise
 
     @staticmethod
     def _is_stale(stamp, now, timeout: float) -> bool:

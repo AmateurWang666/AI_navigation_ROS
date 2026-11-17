@@ -16,9 +16,11 @@ from sensor_msgs.msg import LaserScan
 
 from ai_robot_nav.navigator import NavConfig, plan
 from ai_robot_nav.scan_utils import (
+    Footprint,
     SectorDistanceFilter,
     describe_environment,
     format_distance,
+    forward_free_distance,
     inflate_laser_scan,
     sector_min_distance,
     sector_min_distance_inflated,
@@ -279,6 +281,92 @@ def test_path_half_angle_ignores_side_wall_when_inflation_is_on():
         inflation_radius=0.10,
         inflation_max_range=1.8)
     assert front == pytest.approx(3.0)
+
+
+TJARK = Footprint(radius=0.246, laser_x=0.166, margin=0.05)
+
+
+def tjark_scan(fill=math.inf):
+    """tjark_agv 布局：360 线铺满扫描角 90°–270°，正前方在 180°。"""
+    increment = math.pi / 359.0
+    return make_scan([fill] * 360, angle_min=math.pi / 2.0,
+                     angle_increment=increment, range_max=20.0)
+
+
+def add_wall(scan, front_center_deg, laser_x, point, direction):
+    """在车体坐标下放一堵直墙，把每条射线截到墙上的距离写进 scan。
+
+    ``point`` 是墙上一点、``direction`` 是墙的方向，都在 base_link 坐标下。
+    """
+    px, py = point[0] - laser_x, point[1]
+    dx, dy = direction
+    for index in range(len(scan.ranges)):
+        bearing = scan.angle_min + index * scan.angle_increment - math.radians(front_center_deg)
+        rx, ry = math.cos(bearing), math.sin(bearing)
+        det = rx * (-dy) - ry * (-dx)
+        if abs(det) < 1e-9:
+            continue
+        t = (px * (-dy) - py * (-dx)) / det
+        if 0.0 < t < scan.ranges[index]:
+            scan.ranges[index] = t
+
+
+def test_converging_side_wall_blocks_the_body_but_not_the_narrow_cone():
+    """日志里那次撞墙：右侧墙与车头成 15° 相交，窄扇区看不到，车身会扫到。"""
+    scan = tjark_scan()
+    angle = math.radians(15.0)
+    add_wall(scan, 180.0, TJARK.laser_x, (0.0, -0.40),
+             (math.cos(angle), math.sin(angle)))
+
+    narrow, _, right, _ = describe_environment(
+        scan, 30.0, 90.0, 30.0, 180.0, path_half_deg=12.0)
+    body, _, _, _ = describe_environment(
+        scan, 30.0, 90.0, 30.0, 180.0, path_half_deg=12.0, footprint=TJARK)
+
+    assert narrow > 0.70
+    assert body < 0.45
+    config = NavConfig(forward_clearance=0.60, turn_clearance=0.45, tie_threshold=0.6)
+    _, left, right, _ = describe_environment(scan, 30.0, 90.0, 30.0, 180.0)
+    assert plan(body, left, right, config).action == 'TURN_LEFT'
+
+
+def test_parallel_side_wall_outside_the_margin_does_not_block():
+    """贴墙巡航：墙与车头平行、离车身 0.10 m，大于余量，就应允许直行。"""
+    scan = tjark_scan()
+    add_wall(scan, 180.0, TJARK.laser_x, (0.0, -(TJARK.radius + 0.10)), (1.0, 0.0))
+    front = forward_free_distance(scan, 180.0, TJARK, 12.0)
+    assert front == pytest.approx(scan.range_max)
+
+
+def test_parallel_side_wall_inside_the_margin_blocks():
+    """墙已经进到余量里，往前开只会继续蹭着墙走，必须先转开。"""
+    scan = tjark_scan()
+    add_wall(scan, 180.0, TJARK.laser_x, (0.0, -(TJARK.radius + 0.01)), (1.0, 0.0))
+    assert forward_free_distance(scan, 180.0, TJARK, 12.0) < 0.05
+
+
+def test_obstacle_dead_ahead_reports_travel_before_the_body_touches():
+    """正前方雷达读数 1.0 m：车身前沿离它还有 1.0 + 0.166 - (0.246 + 0.05)。"""
+    scan = tjark_scan()
+    scan.ranges[180] = 1.0
+    expected = 1.0 + TJARK.laser_x - (TJARK.radius + TJARK.margin)
+    assert forward_free_distance(scan, 180.0, TJARK, 12.0) == pytest.approx(expected, abs=1e-3)
+
+
+def test_obstacle_behind_the_center_never_blocks_forward():
+    """圆心之后的回波只会越开越远。360° 雷达能看到这些点，也不能拿它们挡直行。"""
+    scan = make_scan([math.inf] * 360, range_max=20.0)
+    scan.ranges[140] = 0.30   # 雷达左后 140°，换到车体坐标在圆心之后
+    footprint = Footprint(radius=0.246, laser_x=0.166, margin=0.05)
+    assert forward_free_distance(scan, 0.0, footprint, 12.0) == pytest.approx(20.0)
+
+
+def test_blind_path_cone_is_still_blind_with_footprint():
+    """通路扇区全是无效读数时仍是盲区，不能因为别处空旷就判成能走。"""
+    scan = tjark_scan()
+    for index in range(150, 211):
+        scan.ranges[index] = math.nan
+    assert forward_free_distance(scan, 180.0, TJARK, 12.0) is None
 
 
 def test_sparse_table_leg_triggers_turn_after_processing():

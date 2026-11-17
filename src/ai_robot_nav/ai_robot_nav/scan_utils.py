@@ -12,9 +12,20 @@ RPLidar 之类的雷达分辨率、起始角、视场角都不同。把度数当
 """
 
 import math
-from typing import List, Optional, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 
 from sensor_msgs.msg import LaserScan
+
+
+class Footprint(NamedTuple):
+    """圆形车体，圆心在 base_link（差速车的旋转中心）。
+
+    圆形车体原地旋转扫不到任何新的位置，所以只有直行需要按车身宽度检查。
+    """
+
+    radius: float        # 车体外廓半径（m）
+    laser_x: float       # 雷达在 base_link 前方的距离（m），雷达在中线上
+    margin: float = 0.0  # 车身外再留出的间隙（m）
 
 
 def _valid_range(distance: float, scan: LaserScan) -> bool:
@@ -240,6 +251,46 @@ def sector_min_distance_inflated(
     return sector_min_distance(inflated, center_deg, half_width_deg)
 
 
+def forward_free_distance(
+    scan: LaserScan,
+    front_center_deg: float,
+    footprint: Footprint,
+    blind_half_deg: float,
+) -> Optional[float]:
+    """车体沿当前朝向直行多远，外廓（含余量）会碰到第一个回波（m）。
+
+    角度扇区只看雷达正前方一条窄缝。墙和车头成小角度相交时，交点落在侧前方，
+    扇区里一直是空的，车身却会斜着蹭上去。这里把每个回波换到 base_link 坐标，
+    按直行时圆形车体扫过的带状区域判断。
+
+    圆心之后（x <= 0）的回波只会越走越远，不算阻挡。已经落进余量、又在圆心
+    之前的回波返回 0：继续直行只会贴着它走。
+
+    ``blind_half_deg`` 定义的正前方扇区里没有任何可用读数时返回 ``None``，
+    与 ``sector_min_distance`` 的盲区语义一致。都不阻挡时返回 ``range_max``。
+    """
+    if scan is None or not len(scan.ranges) or scan.angle_increment == 0.0:
+        return None
+    if sector_min_distance(scan, front_center_deg, blind_half_deg) is None:
+        return None
+
+    reach = footprint.radius + footprint.margin
+    center = math.radians(front_center_deg)
+    free = scan.range_max
+    for index, distance in enumerate(scan.ranges):
+        if not _valid_range(distance, scan):
+            continue
+        bearing = scan.angle_min + index * scan.angle_increment - center
+        x = footprint.laser_x + distance * math.cos(bearing)
+        y = distance * math.sin(bearing)
+        if x <= 0.0 or abs(y) >= reach:
+            continue
+        travel = max(0.0, x - math.sqrt(reach * reach - y * y))
+        if travel < free:
+            free = travel
+    return free
+
+
 def describe_environment(
     scan: LaserScan,
     front_half_deg: float,
@@ -251,6 +302,7 @@ def describe_environment(
     inflation_max_range: float = 0.0,
     sector_filter: Optional[SectorDistanceFilter] = None,
     filter_time: Optional[float] = None,
+    footprint: Optional[Footprint] = None,
 ) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
     """一次取出前、左、右、后四个方向的最近障碍距离。
 
@@ -274,10 +326,17 @@ def describe_environment(
 
     ``inflation_radius`` 与 ``sector_filter`` 用于稀疏点状障碍（细桌腿等）。
     每个扇区只展宽自己内部的回波，侧向的墙不会被摊进前方通路。
+
+    给出 ``footprint`` 时，「前方」换成 ``forward_free_distance``：车身外廓还能
+    直行多远，而不是雷达到窄扇区里最近点的距离。此时不做角度展宽，带状区域
+    本身已经有车身宽度。左右后三个扇区不变。
     """
     path_half = path_half_deg if path_half_deg > 0.0 else front_half_deg
-    front = sector_min_distance_inflated(
-        scan, front_center_deg, path_half, inflation_radius, inflation_max_range)
+    if footprint is not None:
+        front = forward_free_distance(scan, front_center_deg, footprint, path_half)
+    else:
+        front = sector_min_distance_inflated(
+            scan, front_center_deg, path_half, inflation_radius, inflation_max_range)
     left = sector_min_distance_inflated(
         scan, front_center_deg + side_center_deg, side_half_deg,
         inflation_radius, inflation_max_range)

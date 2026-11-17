@@ -13,9 +13,19 @@ scan_processing:
   inflation_max_range: 1.8        # 米，超过此距离的回波不展宽（侧方远桌不影响前方）
   persistence_sec: 0.25           # 秒，漫游层：稀疏命中的记忆时长
   safety_persistence_sec: 0.18    # 秒，安全层更短，减少贴脸后多余急停拖尾
-  safety_persistence_release_distance: 0.40  # 米，安全层记忆消退阈值（≈ clear_distance）
+  safety_persistence_release_distance: 0.40  # 米，安全层记忆消退阈值（应 > safety_node 的 clear_distance）
   persistence_decay_rate: 0.35    # m/s，记忆距离随时间增大（模拟已绕过障碍）
   persistence_release_distance: 1.10  # 米，漫游层记忆超过此值即释放（应 > forward_clearance）
+
+# 车体外廓：漫游与安全层共用。底板网格是半径 0.246 m 的圆，圆心在 base_link
+# （左右轮中点，也是原地旋转的中心），雷达在其前方 0.166 m 的中线上。
+# 圆形车体原地转不会扫到新位置，所以只检查直行：把每个回波换到 base_link，
+# 看车身沿当前朝向还能走多远。雷达正侧方车身半宽只有 sqrt(0.246²-0.166²)≈0.18 m，
+# 右侧读数 0.18 m 就已经贴墙。
+# 【实车】换外壳、加保险杠或雷达挪位时改这两项；radius 置 0 退回旧的窄扇区判断。
+robot_footprint:
+  radius: 0.246
+  laser_x: 0.166
 
 ai_nav_node:
   scan_topic: "/scan"
@@ -50,8 +60,9 @@ ai_nav_node:
   # 【实车】雷达安装角不同就必须改这一项，否则左右会整体反过来，机器人朝障碍转。
   front_center_angle: 180.0
   front_half_angle: 30.0
-  # 直行/转向决策用的窄前方扇区。宽扇区会把侧墙算进 ahead，贴墙时误报 0.55 m。
+  # 正前方 ±12°。配置了 robot_footprint 时只用来判断盲区：这里全无有效读数就当前方被挡。
   path_half_angle: 12.0
+  footprint_margin: 0.05         # 车身外再留的间隙；墙进到这里面就先转开，不贴着走
   side_center_angle: 90.0
   side_half_angle: 30.0
 
@@ -62,8 +73,10 @@ ai_nav_node:
   turn_speed: 0.45
   reverse_speed: 0.06
   reverse_clearance: 0.35
-  forward_clearance: 0.70        # 大于此距离可直行
-  turn_clearance: 0.55           # 小于此距离必须转向，与上行构成迟滞带
+  # 下面两项是车身外廓（含 footprint_margin）还能直行的距离，不是雷达读数。
+  # 正前方的障碍：雷达读数 = 这里的值 + 0.246 + 0.05 - 0.166。
+  forward_clearance: 0.60        # 大于此距离可直行
+  turn_clearance: 0.45           # 小于此距离必须转向，与上行构成迟滞带
   trapped_distance: 0.35
   tie_threshold: 0.6             # 左右差值小于此值算平局，保持上次方向
   max_linear: 0.20
@@ -106,11 +119,12 @@ safety_node:
   ai_cmd_timeout: 0.7
   scan_timeout: 0.5
   front_center_angle: 180.0      # 与 ai_nav_node 保持一致
-  front_half_angle: 20.0
-  # 【实车】急停距离从雷达算起，而雷达装在 base_link 前方 0.166 m 处；
-  # 实车需按车头实际外廓与制动距离重新给值。
-  stop_distance: 0.24
-  clear_distance: 0.34           # 高于 stop_distance 才有迟滞，避免停走抖动
+  front_half_angle: 20.0         # 配置了 robot_footprint 时只用来判断盲区
+  footprint_margin: 0.02
+  # 【实车】两项都是车身外廓（含 footprint_margin）还能直行的距离，按实测制动距离重给。
+  # 侧前方斜着靠近的墙也算在内，不只看正前方的扇区。
+  stop_distance: 0.10
+  clear_distance: 0.18           # 高于 stop_distance 才有迟滞，避免停走抖动
   max_linear: 0.20
   max_angular: 1.2
   allow_reverse_in_emergency: true

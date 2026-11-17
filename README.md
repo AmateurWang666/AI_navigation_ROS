@@ -317,7 +317,7 @@ wsl -d Ubuntu bash ./scripts/run_tests.sh
 | `command_mux.py` | 仲裁规则：有目标点时用导航速度，指令过期就停车 |
 | `safety_node.py` | 激光急停、速度限幅、上游超时零速；`/cmd_vel` 的唯一发布者 |
 | `motion.py` | 线速度、角速度限幅，AI 节点和安全节点共用 |
-| `scan_utils.py` | 按 `front_center_angle` 取前/左/右/后扇区距离；近距离展宽和短时记忆 |
+| `scan_utils.py` | 按 `front_center_angle` 取前/左/右/后扇区距离；按圆形车身算还能直行多远；近距离展宽和短时记忆 |
 | `llm_client.py` | 向 Ollama 要风险等级和方向偏好，解析失败就当这次没有视觉 |
 | `ros_params.py` | 从参数服务器读数字、布尔和全局参数 |
 | `log_throttle.py` | 按时间间隔压缩重复日志 |
@@ -458,12 +458,17 @@ URDF 由 `urdf/tjark_agv.xacro` 串起来。`<gazebo>` 标签只有 gzserver 读
 | 参数 | 值 | 含义 |
 |------|-----|------|
 | `front_center_angle` | `180.0` | 车体正前方对应的扫描角，即雷达安装偏转角 |
-| `forward_clearance` | `0.70` | 大于此距离可直行 |
-| `turn_clearance` | `0.55` | 小于此距离必须转向（与上行构成迟滞带） |
+| `robot_footprint/radius` | `0.246` | 圆形车体半径，圆心在 `base_link` |
+| `robot_footprint/laser_x` | `0.166` | 雷达在 `base_link` 前方的距离 |
+| `forward_clearance` | `0.60` | 车身外廓还能直行这么远才直行 |
+| `turn_clearance` | `0.45` | 车身外廓能直行的距离小于此值就转向（与上行构成迟滞带） |
 | `tie_threshold` | `0.6` | 左右差距小于此值时保持上次转向方向 |
 | `escape_commit_time` | `4.0` | 连续转向超过此秒数即锁死方向 |
 | `escape_reverse_time` | `9.0` | 再超过此秒数改为边退边转脱困；`0` 关闭 |
-| `stop_distance` | `0.24` | safety 急停距离（从雷达算起） |
+| `stop_distance` | `0.10` | safety 急停：车身外廓能直行的距离小于此值 |
+
+前方距离不是雷达读数，而是圆形车身沿当前朝向还能走多远。斜着靠近的墙在侧前方，
+也会算进来。原地旋转不会扫到新位置，所以转向不检查车身。
 
 雷达坐标与车辆几何见 [docs/platform.md](docs/platform.md)。
 
@@ -475,6 +480,7 @@ URDF 由 `urdf/tjark_agv.xacro` 串起来。`<gazebo>` 标签只有 gzserver 读
 |------|------|------|
 | 只左右转、不前进 | 雷达安装角没对上 | 确认 `front_center_angle: 180`，`sync_ws.sh --build` |
 | 撞墙后左右摆头 | 左右扇区映射反了 | 已修复：四个扇区统一由 `front_center_angle` 推算 |
+| 斜着蹭上墙，之后左转一点、前进一点来回摇头 | 前方只看雷达正前 ±12°，侧前方的墙进不来 | 已修复：前方按圆形车身能直行多远算，见 `robot_footprint` |
 | 转很久出不来 | 车头顶住了障碍 | 已内置：4 s 锁死方向、9 s 边退边转 |
 | Gazebo 启动卡住 | 联网找模型 | 已修复：模型内置且关闭在线模型库；请用 `scripts/sim.sh` |
 | 一直停车 | `/scan` 未发布或 AI 超时 | 先启仿真；`rostopic echo /scan` |
