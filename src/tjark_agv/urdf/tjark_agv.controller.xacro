@@ -16,8 +16,9 @@
             <legacyMode>true</legacyMode>
             <leftJoint>left_to_base</leftJoint>
             <rightJoint>right_to_base</rightJoint>
-            <wheelSeparation>0.34</wheelSeparation>
-            <wheelDiameter>0.12</wheelDiameter>
+            <!-- 与 URDF 左右轮 y=±0.192205、实车轮径 125 mm 一致 -->
+            <wheelSeparation>0.384410</wheelSeparation>
+            <wheelDiameter>0.125</wheelDiameter>
             <broadcastTF>1</broadcastTF>
             <wheelTorque>30</wheelTorque>
             <wheelAcceleration>1.8</wheelAcceleration>

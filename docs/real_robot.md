@@ -20,13 +20,12 @@
 
 ### 1. 仿真对齐实车尺寸
 
-修改 `src/tjark_agv/urdf/tjark_agv.controller.xacro`：
+已完成。`src/tjark_agv/urdf/tjark_agv.controller.xacro`：
 
-- `wheelSeparation` → `0.3844`
-- `wheelDiameter` → `0.125`
+- `wheelSeparation` = `0.384410`（左右轮 `y = ±0.192205`）
+- `wheelDiameter` = `0.125`
 
-URDF 里左右轮关节 `y = ±0.192205` 保持不动。改完后仿真 `/odom` 的尺度才和实车几何一致。
-`amcl` 的 `odom_alpha*` 先留着，等第四步再按新里程计收紧。
+URDF 关节没有改。`amcl` 的 `odom_alpha*` 已改为 `0.1`。实车编码器更吵时再加大。
 
 ### 2. cafe 里验收激光漫游和急停
 

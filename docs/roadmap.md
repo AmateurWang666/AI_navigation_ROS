@@ -17,15 +17,14 @@
 
 ## 现在到哪一步
 
-停在 cafe 仿真。下面四步里，第一步还没做。
+停在 cafe 仿真。尺寸已经对齐实车。下一步是在 cafe 里验收激光漫游和急停。
 
 | 入口 | 现在实际拉起的内容 |
 |------|--------------------|
 | `sim.launch` | Gazebo cafe、漫游、急停，并且默认还有地图和 `move_base` |
 | `real.launch` | 车辆描述 + 漫游层（`ai_nav.launch`）。底盘和雷达驱动的位置是空的，没有 `navigation.launch` |
 
-差速插件仍是轮距 **0.34 m**、轮径 **0.12 m**。实车是轮距 **0.3844 m**、轮径 **125 mm**。
-因此仿真 `/odom` 的尺度和实车几何还不一致。
+差速插件与实车一致：轮距 **0.384410 m**，轮径 **0.125 m**。仿真 `/odom` 按这组数积分。
 
 仓库里已经有两套能力，共用同一条指令链路和同一道安全闸。实车按下面的顺序用，不是两套一起上车：
 
@@ -42,30 +41,24 @@
 - cafe 世界、车辆描述、一份覆盖率约 17% 的演示地图
 - 轻量建图节点、地图校验、命名目的地
 - 不依赖 Gazebo 和 Ollama 的单元测试
+- 差速插件与实车一致：轮距 0.384410 m，轮径 0.125 m
 - `real.launch` 骨架：描述和漫游层已接好，硬件驱动槽是空的
 
 ## 还没做
 
-1. **仿真尺寸未对齐实车。** `tjark_agv.controller.xacro` 的 `wheelSeparation` / `wheelDiameter` 仍是 0.34 和 0.12。
-2. **激光漫游和急停还没有在对齐后的 cafe 里验收。** 代码在跑，验收标准还没过一遍。
-3. **实车驱动没挂。** 没有底盘、雷达、IMU、编码器里程计节点。`real.launch` 一挂上驱动就会按默认值开始漫游，接驱动时还要把 `idle_behavior` 传进去。
-4. **空场标定没做。** `front_center_angle`、`stop_distance` / `clear_distance`、`escape_reverse_time` 都还是仿真初值。
-5. **目标点导航还没进实车启动。** `real.launch` 不包含 `navigation.launch`。`amcl` 的 `odom_alpha*` 仍取 0.3，是为了盖住当前里程计偏差，插件改齐之后再收紧。
-6. **`gazebo_ros_control` 那条通路还没用。** `motor.xacro` 和 `tjark_agv.controller.yaml` 配好了，当前底盘由差速插件直接驱动。
+1. **激光漫游和急停还没有在对齐后的 cafe 里验收。** 代码在跑，验收标准还没过一遍。
+2. **实车驱动没挂。** 没有底盘、雷达、IMU、编码器里程计节点。`real.launch` 一挂上驱动就会按默认值开始漫游，接驱动时还要把 `idle_behavior` 传进去。
+3. **空场标定没做。** `front_center_angle`、`stop_distance` / `clear_distance`、`escape_reverse_time` 都还是仿真初值。
+4. **目标点导航还没进实车启动。** `real.launch` 不包含 `navigation.launch`。`amcl` 的 `odom_alpha*` 已随轮距对齐改回 0.1；实车编码器更吵时再加大。
+5. **`gazebo_ros_control` 那条通路还没用。** `motor.xacro` 和 `tjark_agv.controller.yaml` 配好了，当前底盘由差速插件直接驱动。
 
-相机不是第 3 步的条件。
+相机不是接实车驱动那一步的条件。
 
 ## 建议顺序
 
 ### 1. 仿真对齐实车尺寸
 
-改 `src/tjark_agv/urdf/tjark_agv.controller.xacro`：
-
-- `wheelSeparation` → `0.3844`
-- `wheelDiameter` → `0.125`
-
-URDF 里左右轮关节 `y = ±0.192205` 保持不动。不要改关节去迁就插件。
-`amcl` 的 `odom_alpha*` 先留着，等第 4 步再按新里程计收紧。
+已完成。`tjark_agv.controller.xacro` 的 `wheelSeparation` 是 `0.384410`，`wheelDiameter` 是 `0.125`。URDF 左右轮关节 `y = ±0.192205` 没有改。`amcl` 的 `odom_alpha*` 已改为 `0.1`。
 
 ### 2. 在 cafe 里验收激光漫游和急停
 
