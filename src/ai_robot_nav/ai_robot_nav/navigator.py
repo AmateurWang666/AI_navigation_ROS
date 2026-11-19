@@ -26,7 +26,9 @@ TURNING_ACTIONS = LEFT_ACTIONS + RIGHT_ACTIONS
 class NavConfig(NamedTuple):
     """策略的全部可调参数。实车与仿真共用，差异只体现在 yaml 里的取值。"""
 
-    cruise_speed: float = 0.18        # 前方开阔时的直行速度（m/s）
+    cruise_speed: float = 0.18        # 前方刚够直行时的速度（m/s）
+    open_speed: float = 0.0           # 前方开阔到 open_clearance 时的速度（m/s），不高于 cruise 即关闭
+    open_clearance: float = 2.0       # 用满 open_speed 所需的前方净空（m）
     turn_speed: float = 0.5           # 前方受阻时的原地转向角速度（rad/s）
     reverse_speed: float = 0.08       # 后退速度（m/s），刻意最慢
     reverse_clearance: float = 0.4    # 后方净空不足时不盲退（m）
@@ -151,8 +153,17 @@ def _should_drive_forward(
     return False
 
 
+def _forward_speed(ahead: float, config: NavConfig) -> float:
+    """前方越空越快。在 forward_clearance 处回到 cruise_speed，转向点与急停距离不受影响。"""
+    span = config.open_clearance - config.forward_clearance
+    if config.open_speed <= config.cruise_speed or span <= 0.0:
+        return config.cruise_speed
+    fraction = min(1.0, max(0.0, (ahead - config.forward_clearance) / span))
+    return config.cruise_speed + fraction * (config.open_speed - config.cruise_speed)
+
+
 def _forward_plan(ahead: float, config: NavConfig, hazard: str, extra: str = '') -> Plan:
-    speed = config.cruise_speed
+    speed = _forward_speed(ahead, config)
     reason = f'clear ahead ({ahead:.2f}m)'
     if hazard == 'CAUTION':
         speed *= config.caution_scale

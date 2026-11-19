@@ -69,7 +69,12 @@ ai_nav_node:
   # ---- 速度与净空（【实车】全部需重标定）----
   command_publish_rate: 10.0
   sensor_timeout: 1.0
+  # 前方刚够直行（forward_clearance）时用 cruise_speed，越空越快，
+  # 到 open_clearance 用满 open_speed。靠近障碍前已经降回 cruise_speed。
+  # 【实车】首次上车把 open_speed 设成和 cruise_speed 一样，测完制动再加。
   cruise_speed: 0.15
+  open_speed: 0.30
+  open_clearance: 2.0
   turn_speed: 0.45
   reverse_speed: 0.06
   reverse_clearance: 0.35
@@ -79,7 +84,7 @@ ai_nav_node:
   turn_clearance: 0.45           # 小于此距离必须转向，与上行构成迟滞带
   trapped_distance: 0.35
   tie_threshold: 0.6             # 左右差值小于此值算平局，保持上次方向
-  max_linear: 0.20
+  max_linear: 0.30
   max_angular: 1.2
 
   # ---- 脱困 ----
@@ -107,7 +112,7 @@ nav_mux:
   explore_cmd_timeout: 0.7
   # 无目标点时的行为：explore 漫游 / stop 停车。由 launch 的 idle_behavior 覆盖。
   idle_behavior: "explore"
-  max_linear: 0.20                        # 与 ai_nav_node、safety_node 保持一致
+  max_linear: 0.30                        # 与 ai_nav_node、safety_node 保持一致
   max_angular: 1.2
 
 safety_node:
@@ -125,7 +130,7 @@ safety_node:
   # 侧前方斜着靠近的墙也算在内，不只看正前方的扇区。
   stop_distance: 0.10
   clear_distance: 0.18           # 高于 stop_distance 才有迟滞，避免停走抖动
-  max_linear: 0.20
+  max_linear: 0.30
   max_angular: 1.2
   allow_reverse_in_emergency: true
   allow_rotate_in_emergency: true

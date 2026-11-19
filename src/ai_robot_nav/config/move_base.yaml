@@ -81,7 +81,7 @@ GlobalPlanner:
 
 # ------------------------------------------------------------ 局部规划器
 DWAPlannerROS:
-  # ---- 速度限制（与 nav_params.yaml 的 max_linear / max_angular 保持一致）----
+  # ---- 速度限制（不超过 nav_params.yaml 的 max_linear / max_angular）----
   # 【实车】全部需要重标定。
   max_vel_trans: 0.20
   min_vel_trans: 0.05     # 平移速度下界，太小会让 DWA 选出几乎不动的轨迹而卡住

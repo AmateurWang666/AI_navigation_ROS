@@ -462,6 +462,10 @@ URDF 由 `urdf/tjark_agv.xacro` 串起来。`<gazebo>` 标签只有 gzserver 读
 | `robot_footprint/laser_x` | `0.166` | 雷达在 `base_link` 前方的距离 |
 | `forward_clearance` | `0.60` | 车身外廓还能直行这么远才直行 |
 | `turn_clearance` | `0.45` | 车身外廓能直行的距离小于此值就转向（与上行构成迟滞带） |
+| `cruise_speed` | `0.15` | 前方刚够直行时的速度（m/s） |
+| `open_speed` | `0.30` | 前方开阔到 `open_clearance` 时的速度；不高于 `cruise_speed` 即关闭 |
+| `open_clearance` | `2.0` | 用满 `open_speed` 所需的前方净空（m） |
+| `max_linear` | `0.30` | `ai_nav_node` / `nav_mux` / `safety_node` 的线速度上限 |
 | `tie_threshold` | `0.6` | 左右差距小于此值时保持上次转向方向 |
 | `escape_commit_time` | `4.0` | 连续转向超过此秒数即锁死方向 |
 | `escape_reverse_time` | `9.0` | 再超过此秒数改为边退边转脱困；`0` 关闭 |
@@ -469,6 +473,8 @@ URDF 由 `urdf/tjark_agv.xacro` 串起来。`<gazebo>` 标签只有 gzserver 读
 
 前方距离不是雷达读数，而是圆形车身沿当前朝向还能走多远。斜着靠近的墙在侧前方，
 也会算进来。原地旋转不会扫到新位置，所以转向不检查车身。
+直行速度按前方净空线性爬坡：`forward_clearance` 处是 `cruise_speed`，`open_clearance`
+以外是 `open_speed`，中间按比例过渡；靠近障碍前已经降回巡航值，转向点和急停距离不用跟着改。
 
 雷达坐标与车辆几何见 [docs/platform.md](docs/platform.md)。
 
@@ -481,6 +487,7 @@ URDF 由 `urdf/tjark_agv.xacro` 串起来。`<gazebo>` 标签只有 gzserver 读
 | 只左右转、不前进 | 雷达安装角没对上 | 确认 `front_center_angle: 180`，`sync_ws.sh --build` |
 | 撞墙后左右摆头 | 左右扇区映射反了 | 已修复：四个扇区统一由 `front_center_angle` 推算 |
 | 斜着蹭上墙，之后左转一点、前进一点来回摇头 | 前方只看雷达正前 ±12°，侧前方的墙进不来 | 已修复：前方按圆形车身能直行多远算，见 `robot_footprint` |
+| 空旷处也一直很慢 | 以前只有固定 `cruise_speed`，不会随净空加速 | 已加 `open_speed` / `open_clearance` 爬坡；实车首次把 `open_speed` 设成和 `cruise_speed` 一样 |
 | 转很久出不来 | 车头顶住了障碍 | 已内置：4 s 锁死方向、9 s 边退边转 |
 | Gazebo 启动卡住 | 联网找模型 | 已修复：模型内置且关闭在线模型库；请用 `scripts/sim.sh` |
 | 一直停车 | `/scan` 未发布或 AI 超时 | 先启仿真；`rostopic echo /scan` |

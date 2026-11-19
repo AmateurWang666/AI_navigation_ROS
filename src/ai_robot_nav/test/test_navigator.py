@@ -239,6 +239,46 @@ def test_escape_stays_off_until_the_timers_expire():
         == pytest.approx(0.0)
 
 
+RAMP = CFG._replace(cruise_speed=0.15, open_speed=0.30,
+                    forward_clearance=0.60, turn_clearance=0.45, open_clearance=2.0)
+
+
+def test_open_space_drives_at_open_speed():
+    """前方开阔到 open_clearance 以外就用满速，不能一直按贴墙的保守速度走。"""
+    assert plan(19.0, 3.0, 3.0, RAMP).linear_x == pytest.approx(0.30)
+    assert plan(2.0, 3.0, 3.0, RAMP).linear_x == pytest.approx(0.30)
+
+
+def test_speed_is_back_to_cruise_by_the_forward_clearance():
+    """离开始转向还有一段时，速度必须已经降回巡航值，转向点和急停距离才不用跟着改。"""
+    assert plan(0.60, 3.0, 3.0, RAMP, last_action='FORWARD').linear_x \
+        == pytest.approx(0.15)
+    assert plan(0.50, 3.0, 3.0, RAMP, last_action='FORWARD').linear_x \
+        == pytest.approx(0.15)
+
+
+def test_speed_ramps_monotonically_with_clearance():
+    speeds = [plan(d, 3.0, 3.0, RAMP).linear_x for d in (0.7, 1.0, 1.3, 1.6, 1.9)]
+    assert speeds == sorted(speeds)
+    assert 0.15 < speeds[0] < speeds[-1] < 0.30
+
+
+def test_open_speed_below_cruise_never_slows_below_cruise():
+    """open_speed 配得比 cruise_speed 还低，就当没开，速度不能因此掉下去。"""
+    cfg = RAMP._replace(open_speed=0.10)
+    assert plan(19.0, 3.0, 3.0, cfg).linear_x == pytest.approx(0.15)
+
+
+def test_caution_still_scales_the_ramped_speed_down():
+    baseline = plan(19.0, 3.0, 3.0, RAMP)
+    cautious = plan(19.0, 3.0, 3.0, RAMP, hint('CAUTION'))
+    assert cautious.linear_x == pytest.approx(baseline.linear_x * RAMP.caution_scale)
+    for hazard in ['NONE', 'CAUTION', 'BLOCKED']:
+        for direction in ['LEFT', 'RIGHT', 'STRAIGHT', 'NONE']:
+            result = plan(19.0, 3.0, 3.0, RAMP, hint(hazard, direction))
+            assert result.linear_x <= baseline.linear_x + 1e-9
+
+
 def test_escape_timers_can_be_disabled():
     """两个计时器置 0 即完全关闭，实车调试初期可以先要求纯原地转向。"""
     cfg = CFG._replace(escape_commit_time=0.0, escape_reverse_time=0.0)

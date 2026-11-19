@@ -174,6 +174,8 @@ class AINavNode:
 
         self._nav_config = NavConfig(
             cruise_speed=param_float('cruise_speed', 0.18),
+            open_speed=param_float('open_speed', 0.0),
+            open_clearance=param_float('open_clearance', 2.0),
             turn_speed=param_float('turn_speed', 0.5),
             reverse_speed=param_float('reverse_speed', 0.08),
             reverse_clearance=param_float('reverse_clearance', 0.4),

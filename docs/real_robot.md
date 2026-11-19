@@ -60,8 +60,9 @@ cafe 行人带圆柱碰撞体，用来确认车会绕开或停下，而不是从
 2. **`robot_footprint` 与 `stop_distance` / `clear_distance`。** 先量车身：最外缘到两轮中点的半径填 `radius`（底板是 0.246 m；加了保险杠就量到保险杠），雷达中心到两轮中点的前向距离填 `laser_x`（0.166 m）。急停的两个值是车身外廓（含 `safety_node/footprint_margin` 0.02 m）还能直行的距离，仿真初值 0.10 / 0.18 m。以 `cruise_speed` 直行时触发急停，量车身最后停在离障碍多远；小于 3 cm 就加大 `stop_distance`。保持 `clear_distance > stop_distance`。
 3. **`escape_reverse_time` 置 `0`。** 雷达后方没有采样点。没有后向传感器或防撞条时不要边退边转，脱困只原地转。
 
-速度从 `nav_params.yaml` 的保守初值开始：先关视觉，原地确认 `turn_speed` 转得动，再以
-`cruise_speed` 直行测制动，然后才加 `cruise_speed` 和 `max_linear`。视觉最后开，它只能让车更慢。
+速度从 `nav_params.yaml` 的保守初值开始：先关视觉，原地确认 `turn_speed` 转得动；首次上电把
+`open_speed` 设成和 `cruise_speed` 一样（或直接 `0`），只以 `cruise_speed` 直行测制动；
+制动距离够了再把 `open_speed` / `max_linear` 提到仿真值。视觉最后开，它只能让车更慢。
 
 硬件型号见 [platform.md](platform.md#实车硬件清单)。本仓库没有底盘、雷达、IMU 驱动。
 
